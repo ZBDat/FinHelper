@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Data Viewer</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: #fff;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .upload-section {
+            background: #fff;
+            padding: 30px;
+            margin: 20px;
+            border-radius: 8px;
+            border: 2px dashed #ccc;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-section:hover, .upload-section.dragover {
+            border-color: #2196F3;
+            background: #f0f7ff;
+        }
+        
+        .upload-section h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        
+        .upload-section p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .btn {
+            background: #2196F3;
+            color: #fff;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .btn:hover {
+            background: #1976D2;
+        }
+        
+        .charts-container {
+            padding: 20px;
+            position: relative;
+        }
+        
+        .charts-wrapper {
+            position: relative;
+        }
+        
+        .crosshair-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            border-left: 1px dashed #666;
+            pointer-events: none;
+            display: none;
+            z-index: 1000;
+            will-change: transform;
+        }
+        
+        .chart-wrapper {
+            background: #fff;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .remove-btn {
+            background: #f44336;
+            color: #fff;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .remove-btn:hover {
+            background: #d32f2f;
+        }
+        
+        .chart {
+            width: 100%;
+            height: 400px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            margin: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Trade Data Viewer</h1>
+        <p>Upload CSV or Excel files containing trade data (open, close, high, low)</p>
+    </div>
+    
+    <div class="upload-section" id="uploadSection">
+        <h2>Upload Trade Data Files</h2>
+        <p>Supports .csv and .xlsx/.xls files</p>
+        <button class="btn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+        <input type="file" id="fileInput" class="file-input" multiple accept=".csv,.xlsx,.xls">
+    </div>
+    
+    <div class="charts-container" id="chartsContainer"></div>
+
+    <script>
+        const uploadSection = document.getElementById('uploadSection');
+        const fileInput = document.getElementById('fileInput');
+        const chartsContainer = document.getElementById('chartsContainer');
+        
+        let loadedData = [];
+        let globalMinDate, globalMaxDate;
+        let isSyncing = false;
+        
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.classList.add('dragover');
+        });
+        
+        uploadSection.addEventListener('dragleave', () => {
+            uploadSection.classList.remove('dragover');
+        });
+        
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+        
+        async function handleFiles(files) {
+            chartsContainer.innerHTML = '<div class="loading">Loading files...</div>';
+            loadedData = [];
+            
+            for (const file of files) {
+                try {
+                    const data = await parseFile(file);
+                    if (data && data.length > 0) {
+                        loadedData.push({ name: file.name, data: data });
+                    }
+                } catch (err) {
+                    console.error(`Error parsing ${file.name}:`, err);
+                }
+            }
+            
+            renderCharts();
+        }
+        
+        async function parseFile(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            
+            if (ext === 'csv') {
+                return parseCSV(file);
+            } else if (ext === 'xlsx' || ext === 'xls') {
+                return parseExcel(file);
+            }
+            
+            throw new Error('Unsupported file format');
+        }
+        
+        function parseCSV(file) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(file, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        const processed = processData(results.data);
+                        resolve(processed);
+                    },
+                    error: (err) => reject(err)
+                });
+            });
+        }
+        
+        function parseExcel(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const workbook = XLSX.read(e.target.result, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const sheet = workbook.Sheets[sheetName];
+                        const data = XLSX.utils.sheet_to_json(sheet);
+                        const processed = processData(data);
+                        resolve(processed);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = (err) => reject(err);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        function processData(data) {
+            const normalized = [];
+            
+            for (const row of data) {
+                const date = row.date || row.Date || row.DATE;
+                const open = row.open !== undefined ? row.open : (row.Open !== undefined ? row.Open : row.OPEN);
+                const close = row.close !== undefined ? row.close : (row.Close !== undefined ? row.Close : row.CLOSE);
+                const high = row.high !== undefined ? row.high : (row.High !== undefined ? row.High : row.HIGH);
+                const low = row.low !== undefined ? row.low : (row.Low !== undefined ? row.Low : row.LOW);
+                
+                if (date && open !== undefined && close !== undefined && high !== undefined && low !== undefined) {
+                    normalized.push({
+                        date: new Date(date),
+                        open: parseFloat(open),
+                        close: parseFloat(close),
+                        high: parseFloat(high),
+                        low: parseFloat(low)
+                    });
+                }
+            }
+            
+            normalized.sort((a, b) => a.date - b.date);
+            return normalized;
+        }
+        
+        function getCandleWidthForRange(range) {
+            const visibleDuration = range[1] - range[0];
+            const targetCandles = 30;
+            const width = Math.max(20 * 3600 * 1000, (visibleDuration / targetCandles) * 0.7);
+            return width;
+        }
+        
+        function renderCharts() {
+            chartsContainer.innerHTML = '';
+            
+            if (loadedData.length === 0) {
+                chartsContainer.innerHTML = '<div class="error">No valid data found. Please ensure your files contain columns: date, open, close, high, low</div>';
+                return;
+            }
+            
+            const allDates = loadedData.flatMap(d => d.data.map(x => x.date.getTime()));
+            globalMinDate = Math.min(...allDates);
+            globalMaxDate = Math.max(...allDates);
+            
+            const chartsWrapper = document.createElement('div');
+            chartsWrapper.className = 'charts-wrapper';
+            
+            const crosshairLine = document.createElement('div');
+            crosshairLine.className = 'crosshair-line';
+            chartsWrapper.appendChild(crosshairLine);
+            
+            chartsContainer.appendChild(chartsWrapper);
+            
+            loadedData.forEach((item, index) => {
+                const chartWrapper = document.createElement('div');
+                chartWrapper.className = 'chart-wrapper';
+                chartWrapper.innerHTML = `
+                    <div class="chart-title">
+                        <span>${item.name}</span>
+                        <button class="remove-btn" onclick="removeChart(${index})">Remove</button>
+                    </div>
+                    <div class="chart" id="chart-${index}"></div>
+                `;
+                chartsWrapper.appendChild(chartWrapper);
+                
+                renderCandlestickChart(item.data, item.name, index);
+            });
+            
+            setTimeout(() => setupCrosshair(chartsWrapper, crosshairLine), 100);
+            setTimeout(setupSync, 100);
+        }
+        
+        function renderCandlestickChart(data, filename, index) {
+            const dates = data.map(d => d.date);
+            const opens = data.map(d => d.open);
+            const highs = data.map(d => d.high);
+            const lows = data.map(d => d.low);
+            const closes = data.map(d => d.close);
+            
+            const initialCandleWidth = getCandleWidthForRange([globalMinDate, globalMaxDate]);
+            
+            const trace = {
+                x: dates,
+                close: closes,
+                decreasing: { line: { color: '#4CAF50' }, fill: '#4CAF50' },
+                high: highs,
+                increasing: { line: { color: '#F44336' }, fill: '#F44336' },
+                low: lows,
+                open: opens,
+                type: 'candlestick',
+                xaxis: 'x',
+                yaxis: 'y',
+                name: filename,
+                width: initialCandleWidth
+            };
+            
+            const xaxisConfig = {
+                type: 'date',
+                range: [globalMinDate, globalMaxDate],
+                showgrid: false,
+                zeroline: false,
+                showspikes: false
+            };
+            
+            const layout = {
+                dragmode: 'pan',
+                margin: { l: 60, r: 20, t: 20, b: 30 },
+                xaxis: xaxisConfig,
+                yaxis: {
+                    showgrid: true,
+                    gridcolor: '#eee',
+                    zeroline: false,
+                    spikedash: 'solid',
+                    spikecolor: '#666',
+                    spikethickness: 1,
+                    showspikes: true,
+                    spikesnap: 'cursor',
+                    title: 'Price',
+                    autorange: true
+                },
+                showlegend: false,
+                plot_bgcolor: '#fff',
+                paper_bgcolor: '#fff',
+                hovermode: 'x unified'
+            };
+            
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+                displaylogo: false
+            };
+            
+            Plotly.newPlot(`chart-${index}`, [trace], layout, config);
+        }
+        
+        function setupCrosshair(chartsWrapper, crosshairLine) {
+            let ticking = false;
+            let targetX = 0;
+            let isVisible = false;
+            
+            const updateCrosshair = () => {
+                if (isVisible) {
+                    crosshairLine.style.transform = `translateX(${targetX}px)`;
+                    crosshairLine.style.display = 'block';
+                }
+                ticking = false;
+            };
+            
+            chartsWrapper.addEventListener('mousemove', (e) => {
+                const rect = chartsWrapper.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                
+                if (x >= 0 && x <= rect.width) {
+                    targetX = x;
+                    isVisible = true;
+                } else {
+                    isVisible = false;
+                }
+                
+                if (!ticking) {
+                    requestAnimationFrame(updateCrosshair);
+                    ticking = true;
+                }
+            });
+            
+            chartsWrapper.addEventListener('mouseleave', () => {
+                isVisible = false;
+                crosshairLine.style.display = 'none';
+            });
+        }
+        
+        function setupSync() {
+            const chartIds = loadedData.map((_, i) => `chart-${i}`);
+            
+            chartIds.forEach(chartId => {
+                const chartDiv = document.getElementById(chartId);
+                
+                chartDiv.on('plotly_relayout', function(eventData) {
+                    if (isSyncing) return;
+                    
+                    let newRange = null;
+                    
+                    if (eventData['xaxis.range[0]'] !== undefined && eventData['xaxis.range[1]'] !== undefined) {
+                        newRange = [eventData['xaxis.range[0]'], eventData['xaxis.range[1]']];
+                    } else if (eventData['xaxis.range']) {
+                        newRange = eventData['xaxis.range'];
+                    }
+                    
+                    if (!newRange || !newRange[0] || !newRange[1]) return;
+                    
+                    const newWidth = getCandleWidthForRange(newRange);
+                    
+                    const visibleStart = new Date(newRange[0]);
+                    const visibleEnd = new Date(newRange[1]);
+                    
+                    isSyncing = true;
+                    
+                    chartIds.forEach((otherId, idx) => {
+                        const otherData = loadedData[idx].data;
+                        const otherVisible = otherData.filter(d => 
+                            d.date >= visibleStart && d.date <= visibleEnd
+                        );
+                        
+                        let yRange = null;
+                        if (otherVisible.length > 0) {
+                            const minP = Math.min(...otherVisible.map(d => d.low));
+                            const maxP = Math.max(...otherVisible.map(d => d.high));
+                            const pad = (maxP - minP) * 0.1 || 1;
+                            yRange = [minP - pad, maxP + pad];
+                        }
+                        
+                        const update = {
+                            'xaxis.range': newRange
+                        };
+                        
+                        if (yRange) {
+                            update['yaxis.range'] = yRange;
+                        }
+                        
+                        Plotly.relayout(otherId, update);
+                        Plotly.restyle(otherId, { width: newWidth });
+                    });
+                    
+                    setTimeout(() => { isSyncing = false; }, 100);
+                });
+            });
+        }
+        
+        function removeChart(index) {
+            loadedData.splice(index, 1);
+            renderCharts();
+        }
+    </script>
+</body>
+</html>
