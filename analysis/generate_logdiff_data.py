@@ -12,6 +12,77 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def compute_technical_indicators(
+    input_csv: Path,
+    kdj_period: int = 9,
+    macd_fast: int = 12,
+    macd_slow: int = 26,
+    macd_signal: int = 9,
+    rsi_period: int = 14,
+    wr_period: int = 14,
+    dmi_period: int = 14,
+    cci_period: int = 14,
+    bias_period: int = 6,
+) -> pd.DataFrame:
+    df = pd.read_csv(input_csv, parse_dates=["date"])
+    required = {"high", "low", "close"}
+    if not required.issubset(df.columns):
+        raise ValueError(f"Expected columns {sorted(required)} in {input_csv}")
+
+    out = df.copy()
+    close = out["close"].astype(float)
+    high = out["high"].astype(float)
+    low = out["low"].astype(float)
+
+    low_n = low.rolling(window=kdj_period, min_periods=kdj_period).min()
+    high_n = high.rolling(window=kdj_period, min_periods=kdj_period).max()
+    rsv = (close - low_n) / (high_n - low_n).replace(0, np.nan) * 100
+    out["kdj_k"] = rsv.ewm(alpha=1 / 3, adjust=False).mean()
+    out["kdj_d"] = out["kdj_k"].ewm(alpha=1 / 3, adjust=False).mean()
+    out["kdj_j"] = 3 * out["kdj_k"] - 2 * out["kdj_d"]
+
+    ema_fast = close.ewm(span=macd_fast, adjust=False).mean()
+    ema_slow = close.ewm(span=macd_slow, adjust=False).mean()
+    out["macd_dif"] = ema_fast - ema_slow
+    out["macd_dea"] = out["macd_dif"].ewm(span=macd_signal, adjust=False).mean()
+    out["macd_hist"] = 2 * (out["macd_dif"] - out["macd_dea"])
+
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=rsi_period, min_periods=rsi_period).mean()
+    avg_loss = loss.rolling(window=rsi_period, min_periods=rsi_period).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    out["rsi"] = 100 - (100 / (1 + rs))
+
+    hh = high.rolling(window=wr_period, min_periods=wr_period).max()
+    ll = low.rolling(window=wr_period, min_periods=wr_period).min()
+    out["wr"] = (hh - close) / (hh - ll).replace(0, np.nan) * 100
+
+    prev_close = close.shift(1)
+    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    atr = tr.rolling(window=dmi_period, min_periods=dmi_period).mean()
+    plus_di = 100 * pd.Series(plus_dm, index=out.index).rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
+    minus_di = 100 * pd.Series(minus_dm, index=out.index).rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
+    out["dmi_pdi"] = plus_di
+    out["dmi_mdi"] = minus_di
+    dx = (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan) * 100
+    out["dmi_adx"] = dx.rolling(window=dmi_period, min_periods=dmi_period).mean()
+
+    tp = (high + low + close) / 3
+    ma_tp = tp.rolling(window=cci_period, min_periods=cci_period).mean()
+    md = (tp - ma_tp).abs().rolling(window=cci_period, min_periods=cci_period).mean()
+    out["cci"] = (tp - ma_tp) / (0.015 * md.replace(0, np.nan))
+
+    ma_close = close.rolling(window=bias_period, min_periods=bias_period).mean()
+    out["bias"] = (close - ma_close) / ma_close.replace(0, np.nan) * 100
+    return out
+
+
 def compute_logdiff(input_csv: Path, output_csv: Path) -> None:
     df = pd.read_csv(input_csv, parse_dates=["date"])
     if "close" not in df.columns:
