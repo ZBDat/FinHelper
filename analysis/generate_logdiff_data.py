@@ -24,20 +24,25 @@ def compute_technical_indicators(
     cci_period: int = 14,
     bias_period: int = 6,
 ) -> pd.DataFrame:
-    df = pd.read_csv(input_csv, parse_dates=["date"])
-    required = {"high", "low", "close"}
+    """Compute technical indicators from non-differenced OHLC trade data CSV."""
+    if not input_csv.exists():
+        raise FileNotFoundError(f"Input CSV not found: {input_csv}")
+
+    df = pd.read_csv(input_csv)
+    required = {"date", "high", "low", "close"}
     if not required.issubset(df.columns):
         raise ValueError(f"Expected columns {sorted(required)} in {input_csv}")
+    df["date"] = pd.to_datetime(df["date"])
 
     out = df.copy()
     close = out["close"].astype(float)
     high = out["high"].astype(float)
     low = out["low"].astype(float)
 
-    low_n = low.rolling(window=kdj_period, min_periods=kdj_period).min()
-    high_n = high.rolling(window=kdj_period, min_periods=kdj_period).max()
-    rsv = (close - low_n) / (high_n - low_n).replace(0, np.nan) * 100
-    out["kdj_k"] = rsv.ewm(alpha=1 / 3, adjust=False).mean()
+    rolling_low = low.rolling(window=kdj_period, min_periods=kdj_period).min()
+    rolling_high = high.rolling(window=kdj_period, min_periods=kdj_period).max()
+    raw_stochastic_value = (close - rolling_low) / (rolling_high - rolling_low).replace(0, np.nan) * 100
+    out["kdj_k"] = raw_stochastic_value.ewm(alpha=1 / 3, adjust=False).mean()
     out["kdj_d"] = out["kdj_k"].ewm(alpha=1 / 3, adjust=False).mean()
     out["kdj_j"] = 3 * out["kdj_k"] - 2 * out["kdj_d"]
 
@@ -60,23 +65,23 @@ def compute_technical_indicators(
     out["wr"] = (hh - close) / (hh - ll).replace(0, np.nan) * 100
 
     prev_close = close.shift(1)
-    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    true_range = np.maximum(np.maximum(high - low, (high - prev_close).abs()), (low - prev_close).abs())
     up_move = high.diff()
     down_move = -low.diff()
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-    atr = tr.rolling(window=dmi_period, min_periods=dmi_period).mean()
-    plus_di = 100 * pd.Series(plus_dm, index=out.index).rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
-    minus_di = 100 * pd.Series(minus_dm, index=out.index).rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    atr = true_range.rolling(window=dmi_period, min_periods=dmi_period).mean()
+    plus_di = 100 * plus_dm.rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
+    minus_di = 100 * minus_dm.rolling(window=dmi_period, min_periods=dmi_period).mean() / atr
     out["dmi_pdi"] = plus_di
     out["dmi_mdi"] = minus_di
     dx = (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan) * 100
     out["dmi_adx"] = dx.rolling(window=dmi_period, min_periods=dmi_period).mean()
 
-    tp = (high + low + close) / 3
-    ma_tp = tp.rolling(window=cci_period, min_periods=cci_period).mean()
-    md = (tp - ma_tp).abs().rolling(window=cci_period, min_periods=cci_period).mean()
-    out["cci"] = (tp - ma_tp) / (0.015 * md.replace(0, np.nan))
+    typical_price = (high + low + close) / 3
+    ma_tp = typical_price.rolling(window=cci_period, min_periods=cci_period).mean()
+    mean_dev = (typical_price - ma_tp).abs().rolling(window=cci_period, min_periods=cci_period).mean()
+    out["cci"] = (typical_price - ma_tp) / (0.015 * mean_dev.replace(0, np.nan))
 
     ma_close = close.rolling(window=bias_period, min_periods=bias_period).mean()
     out["bias"] = (close - ma_close) / ma_close.replace(0, np.nan) * 100
