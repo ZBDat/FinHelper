@@ -1,19 +1,33 @@
-# COMEX→Shanghai Transformer Forecast
-
-Data window: 2016-12-20 — 2026-02-24 UTC, total sequences 2206.
-Train/Val/Test sizes: 1544/220/442.
-Sequence length 5 days, horizon 1 day, features: COMEX log returns.
-
-## Model & Training
-- Architecture: Transformer encoder (d_model=32, nhead=4, layers=2).
-- Optimizer: Adam lr 0.001, weight_decay 0.0001, epochs 300, patience 300.
-
-## Test Metrics
-MSE 1.512155e-04, RMSE 1.229697e-02, MAE 7.107423e-03, R² 0.1500, Direction accuracy 0.706.
-Baseline (zero-return) → MSE 1.804692e-04, RMSE 1.343388e-02, MAE 8.379753e-03, R² -0.0144, Direction 0.000.
-
-## Notes
-- Device used: cuda
-- Inputs/outputs scaled with StandardScaler fit on train split.
-- Loss curve saved to `analysis/gold_transformer_loss.png`.
-- Script command: `python analysis/gold_transformer_forecast.py`.
+{
+  "setup": {
+    "start_date": "2017-01-26",
+    "end_date": "2026-02-13",
+    "n_samples": 2182,
+    "train_size": 1527,
+    "val_size": 218,
+    "test_size": 437,
+    "seq_len": 3,
+    "d_model": 60,
+    "nhead": 5,
+    "layers": 1,
+    "dim_ff": 256,
+    "dropout": 0.2,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "epochs": 100,
+    "patience": 100,
+    "device": "cuda"
+  },
+  "test_metrics": {
+    "rmse_price": 0.5196939084683844,
+    "mae_price": 0.4717978239059448,
+    "mse_price": 0.2700817584991455,
+    "r2": -5.158025741577148,
+    "direction_accuracy": 0.43935926773455375
+  },
+  "baseline_metrics": {
+    "rmse_price": 6.5820665192088015,
+    "mae_price": 6.578734009235542,
+    "mse_price": 43.323599663289464
+  }
+}

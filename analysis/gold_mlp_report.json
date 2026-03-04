@@ -1,0 +1,27 @@
+{
+  "setup": {
+    "seq_len": 2,
+    "hidden": 128,
+    "dropout": 0.2,
+    "train_frac": 0.7,
+    "val_frac": 0.1,
+    "batch_size": 64,
+    "epochs": 80,
+    "patience": 20,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "include_indicators": true
+  },
+  "test_metrics": {
+    "rmse_price": 0.21568788806910216,
+    "mae_price": 0.16230162978172302,
+    "mse_price": 0.04652126505970955,
+    "r2": -0.06071269512176514,
+    "direction_accuracy": 0.6750572082379863
+  },
+  "baseline_metrics": {
+    "rmse_price": 6.5820665192088015,
+    "mae_price": 6.578734009235542,
+    "mse_price": 43.323599663289464
+  }
+}
