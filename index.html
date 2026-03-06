@@ -82,6 +82,94 @@
         .btn:hover {
             background: #1976D2;
         }
+
+        .btn:disabled {
+            background: #9e9e9e;
+            cursor: not-allowed;
+        }
+
+        .actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .result-panel {
+            background: #fff;
+            margin: 0 20px 20px;
+            border-radius: 8px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .result-panel pre {
+            margin-top: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 13px;
+            background: #f7f9fc;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .modal {
+            width: min(680px, 92vw);
+            max-height: 88vh;
+            overflow: auto;
+            background: #fff;
+            border-radius: 8px;
+            padding: 18px 20px;
+        }
+
+        .modal h3 {
+            margin-bottom: 12px;
+        }
+
+        .scheme-list {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 8px;
+        }
+
+        .param-item label {
+            font-size: 12px;
+            color: #555;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .param-item input, .param-item select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d5d5d5;
+            border-radius: 6px;
+        }
+
+        .modal-actions {
+            margin-top: 14px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
         
         .charts-container {
             padding: 20px;
@@ -169,18 +257,89 @@
         <p>Supports .csv and .xlsx/.xls files</p>
         <button class="btn" onclick="document.getElementById('fileInput').click()">Select Files</button>
         <input type="file" id="fileInput" class="file-input" multiple accept=".csv,.xlsx,.xls">
+        <div class="actions">
+            <button class="btn" id="openTrainDialogBtn" disabled>Train Model</button>
+            <button class="btn" id="predictBtn" disabled>Predict with Trained Weights</button>
+        </div>
     </div>
-    
+
+    <div class="result-panel" id="resultPanel">
+        <div id="resultTitle"></div>
+        <pre id="resultContent"></pre>
+    </div>
+
     <div class="charts-container" id="chartsContainer"></div>
+
+    <div class="modal-backdrop" id="trainModalBackdrop">
+        <div class="modal">
+            <h3>Training Parameters</h3>
+            <div class="scheme-list">
+                <label><input type="radio" name="trainStrategy" value="mlp" checked> MLP (available)</label>
+                <label><input type="radio" name="trainStrategy" value="transformer" disabled> Transformer (coming soon)</label>
+                <label><input type="radio" name="trainStrategy" value="lstm" disabled> LSTM (coming soon)</label>
+            </div>
+            <div class="param-grid">
+                <div class="param-item"><label>seq_len</label><input type="number" id="paramSeqLen" value="2" min="2"></div>
+                <div class="param-item"><label>train_frac</label><input type="number" id="paramTrainFrac" value="0.7" step="0.01"></div>
+                <div class="param-item"><label>val_frac</label><input type="number" id="paramValFrac" value="0.1" step="0.01"></div>
+                <div class="param-item"><label>epochs</label><input type="number" id="paramEpochs" value="100" min="1"></div>
+                <div class="param-item"><label>patience</label><input type="number" id="paramPatience" value="20" min="1"></div>
+                <div class="param-item"><label>batch_size</label><input type="number" id="paramBatchSize" value="64" min="1"></div>
+                <div class="param-item"><label>lr</label><input type="number" id="paramLr" value="0.001" step="0.0001"></div>
+                <div class="param-item"><label>weight_decay</label><input type="number" id="paramWeightDecay" value="0.0001" step="0.0001"></div>
+                <div class="param-item"><label>dropout</label><input type="number" id="paramDropout" value="0.1" step="0.01"></div>
+                <div class="param-item"><label>hidden</label><input type="number" id="paramHidden" value="128" min="2"></div>
+                <div class="param-item"><label>seed</label><input type="number" id="paramSeed" value="42" min="1"></div>
+                <div class="param-item"><label>include_indicators</label>
+                    <select id="paramIncludeIndicators">
+                        <option value="false" selected>false</option>
+                        <option value="true">true</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" id="cancelTrainBtn" style="background:#757575;">Cancel</button>
+                <button class="btn" id="confirmTrainBtn">Start Training</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const uploadSection = document.getElementById('uploadSection');
         const fileInput = document.getElementById('fileInput');
         const chartsContainer = document.getElementById('chartsContainer');
+        const openTrainDialogBtn = document.getElementById('openTrainDialogBtn');
+        const predictBtn = document.getElementById('predictBtn');
+        const resultPanel = document.getElementById('resultPanel');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+        const trainModalBackdrop = document.getElementById('trainModalBackdrop');
+        const cancelTrainBtn = document.getElementById('cancelTrainBtn');
+        const confirmTrainBtn = document.getElementById('confirmTrainBtn');
         
         let loadedData = [];
         let globalMinDate, globalMaxDate;
         let isSyncing = false;
+        let hasTrainedModel = false;
+        const apiBaseFromQuery = new URLSearchParams(window.location.search).get('apiBase');
+        const TRAIN_API_BASE = apiBaseFromQuery || 'http://127.0.0.1:8765';
+
+        openTrainDialogBtn.addEventListener('click', () => {
+            trainModalBackdrop.style.display = 'flex';
+        });
+
+        cancelTrainBtn.addEventListener('click', () => {
+            trainModalBackdrop.style.display = 'none';
+        });
+
+        trainModalBackdrop.addEventListener('click', (e) => {
+            if (e.target === trainModalBackdrop) {
+                trainModalBackdrop.style.display = 'none';
+            }
+        });
+
+        confirmTrainBtn.addEventListener('click', trainModel);
+        predictBtn.addEventListener('click', predictWithTrainedModel);
         
         uploadSection.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -204,6 +363,8 @@
         async function handleFiles(files) {
             chartsContainer.innerHTML = '<div class="loading">Loading files...</div>';
             loadedData = [];
+            hasTrainedModel = false;
+            predictBtn.disabled = true;
             
             for (const file of files) {
                 try {
@@ -217,6 +378,122 @@
             }
             
             renderCharts();
+            openTrainDialogBtn.disabled = loadedData.length === 0;
+        }
+
+        function getTrainingParams() {
+            return {
+                seq_len: parseInt(document.getElementById('paramSeqLen').value, 10),
+                train_frac: parseFloat(document.getElementById('paramTrainFrac').value),
+                val_frac: parseFloat(document.getElementById('paramValFrac').value),
+                epochs: parseInt(document.getElementById('paramEpochs').value, 10),
+                patience: parseInt(document.getElementById('paramPatience').value, 10),
+                batch_size: parseInt(document.getElementById('paramBatchSize').value, 10),
+                lr: parseFloat(document.getElementById('paramLr').value),
+                weight_decay: parseFloat(document.getElementById('paramWeightDecay').value),
+                dropout: parseFloat(document.getElementById('paramDropout').value),
+                hidden: parseInt(document.getElementById('paramHidden').value, 10),
+                seed: parseInt(document.getElementById('paramSeed').value, 10),
+                include_indicators: document.getElementById('paramIncludeIndicators').value === 'true'
+            };
+        }
+
+        function serializeLoadedData() {
+            return loadedData.map(item => ({
+                name: item.name,
+                data: item.data.map(row => ({
+                    date: row.date.toISOString().slice(0, 10),
+                    open: row.open,
+                    high: row.high,
+                    low: row.low,
+                    close: row.close
+                }))
+            }));
+        }
+
+        function showResult(title, payload) {
+            resultPanel.style.display = 'block';
+            resultTitle.textContent = title;
+            resultContent.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+        }
+
+        async function trainModel() {
+            if (loadedData.length === 0) {
+                showResult('Training failed', 'Please import trade data first.');
+                return;
+            }
+
+            const selected = document.querySelector('input[name="trainStrategy"]:checked');
+            const strategy = selected ? selected.value : 'mlp';
+            if (strategy !== 'mlp') {
+                showResult('Training failed', 'Only MLP strategy is currently available.');
+                return;
+            }
+
+            confirmTrainBtn.disabled = true;
+            showResult('Training', 'Training in progress...');
+
+            try {
+                const response = await fetch(`${TRAIN_API_BASE}/api/train`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        strategy,
+                        params: getTrainingParams(),
+                        datasets: serializeLoadedData()
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || 'Train API failed');
+                }
+
+                hasTrainedModel = true;
+                predictBtn.disabled = false;
+                trainModalBackdrop.style.display = 'none';
+                showResult('Training completed', {
+                    model_path: result.model_path,
+                    setup: result.report.setup,
+                    test_metrics: result.report.test_metrics,
+                    baseline_metrics: result.report.baseline_metrics
+                });
+            } catch (err) {
+                const isNetworkError = err instanceof TypeError;
+                const hint = isNetworkError
+                    ? `\n\nPlease start backend API (default ${TRAIN_API_BASE}):\npython ui_train_server.py --host 127.0.0.1 --port 8765`
+                    : '';
+                const msg = `Training failed: ${err.message}${hint}`;
+                showResult('Training failed', msg);
+            } finally {
+                confirmTrainBtn.disabled = false;
+            }
+        }
+
+        async function predictWithTrainedModel() {
+            if (!hasTrainedModel) {
+                showResult('Prediction failed', 'Please train the model first.');
+                return;
+            }
+
+            predictBtn.disabled = true;
+            showResult('Predicting', 'Running prediction...');
+            try {
+                const response = await fetch(`${TRAIN_API_BASE}/api/predict`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ datasets: serializeLoadedData() })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || 'Predict API failed');
+                }
+                showResult('Prediction completed', result.prediction);
+            } catch (err) {
+                showResult('Prediction failed', `Prediction failed: ${err.message}`);
+            } finally {
+                predictBtn.disabled = false;
+            }
         }
         
         async function parseFile(file) {
@@ -498,6 +775,11 @@
         function removeChart(index) {
             loadedData.splice(index, 1);
             renderCharts();
+            openTrainDialogBtn.disabled = loadedData.length === 0;
+            if (loadedData.length === 0) {
+                hasTrainedModel = false;
+                predictBtn.disabled = true;
+            }
         }
     </script>
 </body>
