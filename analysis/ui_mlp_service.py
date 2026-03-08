@@ -200,7 +200,12 @@ def predict_with_bundle(bundle: TrainedBundle, datasets: List[Dict[str, Any]]) -
     with tempfile.TemporaryDirectory() as tmp_dir:
         raw_dir = Path(tmp_dir)
         _prepare_raw_files(datasets, raw_dir)
-        panel = run_prep(raw_dir=raw_dir, out_path=None, include_indicators=bundle.include_indicators)
+        panel = run_prep(
+            raw_dir=raw_dir,
+            out_path=None,
+            include_indicators=bundle.include_indicators,
+            drop_last_unlabeled=False,
+        )
 
     feature_cols = bundle.feature_cols
     if "label" not in panel.columns:

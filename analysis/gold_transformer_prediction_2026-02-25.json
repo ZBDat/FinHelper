@@ -1,0 +1,40 @@
+{
+  "setup": {
+    "seq_len": 3,
+    "train_frac": 0.7,
+    "val_frac": 0.1,
+    "d_model": 60,
+    "nhead": 5,
+    "layers": 1,
+    "dim_ff": 256,
+    "dropout": 0.2,
+    "input_dropout": 0.1,
+    "batch_size": 32,
+    "epochs": 100,
+    "patience": 100,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "include_indicators": true,
+    "seed": 42,
+    "train_end_date": "2026-02-13",
+    "prediction_base_date": "2026-02-24"
+  },
+  "test_metrics": {
+    "rmse_price": 0.5291360702329879,
+    "mae_price": 0.4818355441093445,
+    "mse_price": 0.2799849808216095,
+    "r2": -5.383824825286865,
+    "direction_accuracy": 0.4874141876430206
+  },
+  "baseline_metrics": {
+    "rmse_price": 6.5820665192088015,
+    "mae_price": 6.578734009235542,
+    "mse_price": 43.323599663289464
+  },
+  "prediction": {
+    "predicted_log_close": 6.082147121429443,
+    "predicted_close": 437.96855756983575,
+    "prediction_for_date": "2026-02-25",
+    "based_on_date": "2026-02-24"
+  }
+}

@@ -33,7 +33,7 @@ def _load_price(path: Path, tz: str, close_hour: int) -> pd.Series:
     return pd.Series(grouped.values, index=grouped.index, name="close")
 
 
-def _build_with_indicators(comex_path: Path, sh_path: Path) -> pd.DataFrame:
+def _build_with_indicators(comex_path: Path, sh_path: Path, drop_last_unlabeled: bool = True) -> pd.DataFrame:
     if compute_technical_indicators is None:
         raise RuntimeError("compute_technical_indicators unavailable; set include_indicators=False")
 
@@ -56,11 +56,12 @@ def _build_with_indicators(comex_path: Path, sh_path: Path) -> pd.DataFrame:
     df = base.join(comex_ind, how="inner").join(sh_ind, how="inner")
     df = df.dropna().sort_index()
     df["label"] = df["log_close_sh"].shift(-1)
-    df = df.dropna()
+    if drop_last_unlabeled:
+        df = df.dropna()
     return df
 
 
-def _build_minimal(comex_path: Path, sh_path: Path) -> pd.DataFrame:
+def _build_minimal(comex_path: Path, sh_path: Path, drop_last_unlabeled: bool = True) -> pd.DataFrame:
     comex = _load_price(comex_path, tz="America/New_York", close_hour=17)
     sh = _load_price(sh_path, tz="Asia/Shanghai", close_hour=15)
 
@@ -69,11 +70,17 @@ def _build_minimal(comex_path: Path, sh_path: Path) -> pd.DataFrame:
     df = pd.concat([comex_log, sh_log], axis=1, join="inner")
     df = df.dropna().sort_index()
     df["label"] = df["log_close_sh"].shift(-1)
-    df = df.dropna()
+    if drop_last_unlabeled:
+        df = df.dropna()
     return df
 
 
-def run_prep(raw_dir: Path, out_path: Optional[Path] = None, include_indicators: bool = False) -> pd.DataFrame:
+def run_prep(
+    raw_dir: Path,
+    out_path: Optional[Path] = None,
+    include_indicators: bool = False,
+    drop_last_unlabeled: bool = True,
+) -> pd.DataFrame:
     """Prepare feature table with optional technical indicators and label = next-day log_close_sh.
 
     Default keeps indicators off to remain robust for very short synthetic datasets (tests).
@@ -84,12 +91,12 @@ def run_prep(raw_dir: Path, out_path: Optional[Path] = None, include_indicators:
     sh_path = raw_dir / "shanghai_gold_9999.csv"
 
     if include_indicators and compute_technical_indicators is not None:
-        df = _build_with_indicators(comex_path, sh_path)
+        df = _build_with_indicators(comex_path, sh_path, drop_last_unlabeled=drop_last_unlabeled)
         if len(df) < 3:
             # Fallback when rolling-window indicators wipe out short samples
-            df = _build_minimal(comex_path, sh_path)
+            df = _build_minimal(comex_path, sh_path, drop_last_unlabeled=drop_last_unlabeled)
     else:
-        df = _build_minimal(comex_path, sh_path)
+        df = _build_minimal(comex_path, sh_path, drop_last_unlabeled=drop_last_unlabeled)
 
     if out_path is not None:
         out_path = Path(out_path)
