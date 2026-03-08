@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from analysis.ui_mlp_service import predict_with_bundle, train_from_uploaded_data
@@ -84,4 +85,5 @@ def test_predict_uses_latest_available_date(tmp_path: Path) -> None:
     pred = predict_with_bundle(bundle, datasets)
 
     assert pred["based_on_date"] == "2024-02-24"
-    assert pred["prediction_for_date"] == "2024-02-26"
+    expected_next_business_day = (pd.Timestamp("2024-02-24") + pd.tseries.offsets.BDay(1)).strftime("%Y-%m-%d")
+    assert pred["prediction_for_date"] == expected_next_business_day
