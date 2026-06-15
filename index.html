@@ -1,786 +1,349 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trade Data Viewer</title>
+    <title>FinHelper 实时持仓面板</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --text: #222;
+            --muted: #666;
+            --good: #16803c;
+            --bad: #ca2d2d;
+            --line: #e6eaf0;
+            --blue: #2463eb;
         }
-        
+        * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            color: #333;
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        
-        .header {
-            background: #fff;
-            padding: 20px 30px;
-            border-bottom: 1px solid #e0e0e0;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        .page {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 12px;
+            display: grid;
+            gap: 12px;
         }
-        
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .upload-section {
-            background: #fff;
-            padding: 30px;
-            margin: 20px;
-            border-radius: 8px;
-            border: 2px dashed #ccc;
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-        
-        .upload-section:hover, .upload-section.dragover {
-            border-color: #2196F3;
-            background: #f0f7ff;
-        }
-        
-        .upload-section h2 {
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-        
-        .upload-section p {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-        
-        .file-input {
-            display: none;
-        }
-        
-        .btn {
-            background: #2196F3;
-            color: #fff;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        .btn:hover {
-            background: #1976D2;
-        }
-
-        .btn:disabled {
-            background: #9e9e9e;
-            cursor: not-allowed;
-        }
-
-        .actions {
-            margin-top: 16px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .result-panel {
-            background: #fff;
-            margin: 0 20px 20px;
-            border-radius: 8px;
-            padding: 16px 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            display: none;
-        }
-
-        .result-panel pre {
-            margin-top: 10px;
-            white-space: pre-wrap;
-            word-break: break-word;
-            font-size: 13px;
-            background: #f7f9fc;
-            border-radius: 6px;
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
             padding: 12px;
         }
-
-        .modal-backdrop {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.45);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
-        .modal {
-            width: min(680px, 92vw);
-            max-height: 88vh;
-            overflow: auto;
-            background: #fff;
-            border-radius: 8px;
-            padding: 18px 20px;
-        }
-
-        .modal h3 {
-            margin-bottom: 12px;
-        }
-
-        .scheme-list {
-            display: grid;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-
-        .param-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 8px;
-        }
-
-        .param-item label {
-            font-size: 12px;
-            color: #555;
-            display: block;
-            margin-bottom: 4px;
-        }
-
-        .param-item input, .param-item select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #d5d5d5;
-            border-radius: 6px;
-        }
-
-        .modal-actions {
-            margin-top: 14px;
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-        }
-        
-        .charts-container {
-            padding: 20px;
-            position: relative;
-        }
-        
-        .charts-wrapper {
-            position: relative;
-        }
-        
-        .crosshair-line {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 1px;
-            border-left: 1px dashed #666;
-            pointer-events: none;
-            display: none;
-            z-index: 1000;
-            will-change: transform;
-        }
-        
-        .chart-wrapper {
-            background: #fff;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            padding: 15px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        
-        .chart-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #eee;
+        .title-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
         }
-        
-        .remove-btn {
-            background: #f44336;
-            color: #fff;
-            padding: 6px 12px;
-            border: none;
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
+        h1, h2, h3, p { margin: 0; }
+        h1 { font-size: 20px; }
+        h2 { font-size: 16px; margin-bottom: 8px; }
+        .muted { color: var(--muted); font-size: 13px; }
+        .grid-2 {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: 2fr 1fr;
         }
-        
-        .remove-btn:hover {
-            background: #d32f2f;
-        }
-        
-        .chart {
+        textarea {
             width: 100%;
-            height: 400px;
+            min-height: 120px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 13px;
+            resize: vertical;
         }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
+        .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            background: var(--blue);
+            color: #fff;
+            font-size: 13px;
         }
-        
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 15px;
-            margin: 20px;
-            border-radius: 6px;
-            border-left: 4px solid #c62828;
+        button.secondary { background: #6d7a90; }
+        .metrics {
+            margin-top: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 8px;
+        }
+        .metric {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 8px;
+            background: #fbfcff;
+        }
+        .metric .k { color: var(--muted); font-size: 12px; }
+        .metric .v { font-size: 18px; font-weight: 600; margin-top: 4px; }
+        .good { color: var(--good); }
+        .bad { color: var(--bad); }
+        .assets {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        }
+        .asset-item {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px;
+            background: #fff;
+        }
+        .chart { width: 100%; height: 340px; }
+        .asset-chart { width: 100%; height: 250px; margin-top: 8px; }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #999;
+            display: inline-block;
+        }
+        .status-dot.ok { background: #1f9d4f; }
+        .status-dot.err { background: #cc3f3f; }
+
+        @media (max-width: 860px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .chart { height: 290px; }
+            .asset-chart { height: 220px; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Trade Data Viewer</h1>
-        <p>Upload CSV or Excel files containing trade data (open, close, high, low)</p>
-    </div>
-    
-    <div class="upload-section" id="uploadSection">
-        <h2>Upload Trade Data Files</h2>
-        <p>Supports .csv and .xlsx/.xls files</p>
-        <button class="btn" onclick="document.getElementById('fileInput').click()">Select Files</button>
-        <input type="file" id="fileInput" class="file-input" multiple accept=".csv,.xlsx,.xls">
-        <div class="actions">
-            <button class="btn" id="openTrainDialogBtn" disabled>Train Model</button>
-            <button class="btn" id="predictBtn" disabled>Predict with Trained Weights</button>
-        </div>
-    </div>
-
-    <div class="result-panel" id="resultPanel">
-        <div id="resultTitle"></div>
-        <pre id="resultContent"></pre>
-    </div>
-
-    <div class="charts-container" id="chartsContainer"></div>
-
-    <div class="modal-backdrop" id="trainModalBackdrop">
-        <div class="modal">
-            <h3>Training Parameters</h3>
-            <div class="scheme-list">
-                <label><input type="radio" name="trainStrategy" value="mlp" checked> MLP (available)</label>
-                <label><input type="radio" name="trainStrategy" value="transformer" disabled> Transformer (coming soon)</label>
-                <label><input type="radio" name="trainStrategy" value="lstm" disabled> LSTM (coming soon)</label>
+<div class="page">
+    <div class="card">
+        <div class="title-row">
+            <div>
+                <h1>FinHelper 实时资产看板</h1>
+                <p class="muted">前后端分离：前端只做展示与交互，后端统一做行情抓取、持仓计算和实时推送。</p>
             </div>
-            <div class="param-grid">
-                <div class="param-item"><label>seq_len</label><input type="number" id="paramSeqLen" value="2" min="2"></div>
-                <div class="param-item"><label>train_frac</label><input type="number" id="paramTrainFrac" value="0.7" step="0.01"></div>
-                <div class="param-item"><label>val_frac</label><input type="number" id="paramValFrac" value="0.1" step="0.01"></div>
-                <div class="param-item"><label>epochs</label><input type="number" id="paramEpochs" value="100" min="1"></div>
-                <div class="param-item"><label>patience</label><input type="number" id="paramPatience" value="20" min="1"></div>
-                <div class="param-item"><label>batch_size</label><input type="number" id="paramBatchSize" value="64" min="1"></div>
-                <div class="param-item"><label>lr</label><input type="number" id="paramLr" value="0.001" step="0.0001"></div>
-                <div class="param-item"><label>weight_decay</label><input type="number" id="paramWeightDecay" value="0.0001" step="0.0001"></div>
-                <div class="param-item"><label>dropout</label><input type="number" id="paramDropout" value="0.1" step="0.01"></div>
-                <div class="param-item"><label>hidden</label><input type="number" id="paramHidden" value="128" min="2"></div>
-                <div class="param-item"><label>seed</label><input type="number" id="paramSeed" value="42" min="1"></div>
-                <div class="param-item"><label>include_indicators</label>
-                    <select id="paramIncludeIndicators">
-                        <option value="false" selected>false</option>
-                        <option value="true">true</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn" id="cancelTrainBtn" style="background:#757575;">Cancel</button>
-                <button class="btn" id="confirmTrainBtn">Start Training</button>
+            <div class="title-row">
+                <span id="connDot" class="status-dot"></span>
+                <span id="connText" class="muted">连接中...</span>
             </div>
         </div>
     </div>
 
-    <script>
-        const uploadSection = document.getElementById('uploadSection');
-        const fileInput = document.getElementById('fileInput');
-        const chartsContainer = document.getElementById('chartsContainer');
-        const openTrainDialogBtn = document.getElementById('openTrainDialogBtn');
-        const predictBtn = document.getElementById('predictBtn');
-        const resultPanel = document.getElementById('resultPanel');
-        const resultTitle = document.getElementById('resultTitle');
-        const resultContent = document.getElementById('resultContent');
-        const trainModalBackdrop = document.getElementById('trainModalBackdrop');
-        const cancelTrainBtn = document.getElementById('cancelTrainBtn');
-        const confirmTrainBtn = document.getElementById('confirmTrainBtn');
-        
-        let loadedData = [];
-        let globalMinDate, globalMaxDate;
-        let isSyncing = false;
-        let hasTrainedModel = false;
-        const apiBaseFromQuery = new URLSearchParams(window.location.search).get('apiBase');
-        const TRAIN_API_BASE = apiBaseFromQuery || 'http://127.0.0.1:8765';
+    <div class="grid-2">
+        <div class="card">
+            <h2>导入持仓（名称或代码）</h2>
+            <p class="muted">每行：名称/代码, 数量, 成本价。示例已包含现货黄金测试用例。</p>
+            <textarea id="holdingsInput"></textarea>
+            <div class="btns">
+                <button id="importBtn">导入并替换持仓</button>
+                <button class="secondary" id="appendBtn">追加持仓</button>
+                <button class="secondary" id="goldCaseBtn">填入现货黄金示例</button>
+            </div>
+            <p class="muted" id="importResult" style="margin-top:8px;"></p>
+        </div>
 
-        openTrainDialogBtn.addEventListener('click', () => {
-            trainModalBackdrop.style.display = 'flex';
-        });
+        <div class="card">
+            <h2>客户交互（预留）</h2>
+            <p class="muted" id="interactionInfo">加载中...</p>
+            <div class="btns">
+                <button class="secondary" id="refreshInteractionBtn">刷新预留能力</button>
+            </div>
+            <p class="muted" style="margin-top:8px;">后续可接入登录、消息、指令回传，此面板独立于图表区，避免冲突。</p>
+        </div>
+    </div>
 
-        cancelTrainBtn.addEventListener('click', () => {
-            trainModalBackdrop.style.display = 'none';
-        });
+    <div class="card">
+        <h2>总资产实时指标</h2>
+        <div class="metrics" id="portfolioMetrics"></div>
+        <div id="totalChart" class="chart"></div>
+    </div>
 
-        trainModalBackdrop.addEventListener('click', (e) => {
-            if (e.target === trainModalBackdrop) {
-                trainModalBackdrop.style.display = 'none';
-            }
-        });
+    <div class="card">
+        <h2>各资产实时指标与曲线</h2>
+        <div id="assetsContainer" class="assets"></div>
+    </div>
+</div>
 
-        confirmTrainBtn.addEventListener('click', trainModel);
-        predictBtn.addEventListener('click', predictWithTrainedModel);
-        
-        uploadSection.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadSection.classList.add('dragover');
-        });
-        
-        uploadSection.addEventListener('dragleave', () => {
-            uploadSection.classList.remove('dragover');
-        });
-        
-        uploadSection.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadSection.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
-        });
-        
-        fileInput.addEventListener('change', (e) => {
-            handleFiles(e.target.files);
-        });
-        
-        async function handleFiles(files) {
-            chartsContainer.innerHTML = '<div class="loading">Loading files...</div>';
-            loadedData = [];
-            hasTrainedModel = false;
-            predictBtn.disabled = true;
-            
-            for (const file of files) {
-                try {
-                    const data = await parseFile(file);
-                    if (data && data.length > 0) {
-                        loadedData.push({ name: file.name, data: data });
-                    }
-                } catch (err) {
-                    console.error(`Error parsing ${file.name}:`, err);
+<script>
+    const apiBase = new URLSearchParams(window.location.search).get('apiBase') || '';
+    const connDot = document.getElementById('connDot');
+    const connText = document.getElementById('connText');
+    const importResult = document.getElementById('importResult');
+    const portfolioMetrics = document.getElementById('portfolioMetrics');
+    const assetsContainer = document.getElementById('assetsContainer');
+    const holdingsInput = document.getElementById('holdingsInput');
+    const DEFAULT_GOLD_CASE = '现货黄金,1,2300';
+
+    let eventSource = null;
+
+    const fmtMoney = (n) => Number.isFinite(n) ? n.toFixed(2) : '-';
+    const fmtPct = (n) => Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '-';
+
+    function clsBySign(num) {
+        if (!Number.isFinite(num) || num === 0) return '';
+        return num > 0 ? 'good' : 'bad';
+    }
+
+    function parseRows(text) {
+        const errors = [];
+        const rows = text
+            .split('\n')
+            .map((line, idx) => ({ line: line.trim(), idx: idx + 1 }))
+            .filter(item => item.line)
+            .map(item => {
+                const cols = item.line.split(/[，,\s]+/).filter(Boolean);
+                if (cols.length !== 3) {
+                    errors.push(`第 ${item.idx} 行格式错误，应为: 名称/代码,数量,成本价`);
+                    return null;
                 }
-            }
-            
-            renderCharts();
-            openTrainDialogBtn.disabled = loadedData.length === 0;
-        }
-
-        function getTrainingParams() {
-            return {
-                seq_len: parseInt(document.getElementById('paramSeqLen').value, 10),
-                train_frac: parseFloat(document.getElementById('paramTrainFrac').value),
-                val_frac: parseFloat(document.getElementById('paramValFrac').value),
-                epochs: parseInt(document.getElementById('paramEpochs').value, 10),
-                patience: parseInt(document.getElementById('paramPatience').value, 10),
-                batch_size: parseInt(document.getElementById('paramBatchSize').value, 10),
-                lr: parseFloat(document.getElementById('paramLr').value),
-                weight_decay: parseFloat(document.getElementById('paramWeightDecay').value),
-                dropout: parseFloat(document.getElementById('paramDropout').value),
-                hidden: parseInt(document.getElementById('paramHidden').value, 10),
-                seed: parseInt(document.getElementById('paramSeed').value, 10),
-                include_indicators: document.getElementById('paramIncludeIndicators').value === 'true'
-            };
-        }
-
-        function serializeLoadedData() {
-            return loadedData.map(item => ({
-                name: item.name,
-                data: item.data.map(row => ({
-                    date: row.date.toISOString().slice(0, 10),
-                    open: row.open,
-                    high: row.high,
-                    low: row.low,
-                    close: row.close
-                }))
-            }));
-        }
-
-        function showResult(title, payload) {
-            resultPanel.style.display = 'block';
-            resultTitle.textContent = title;
-            resultContent.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
-        }
-
-        async function trainModel() {
-            if (loadedData.length === 0) {
-                showResult('Training failed', 'Please import trade data first.');
-                return;
-            }
-
-            const selected = document.querySelector('input[name="trainStrategy"]:checked');
-            const strategy = selected ? selected.value : 'mlp';
-            if (strategy !== 'mlp') {
-                showResult('Training failed', 'Only MLP strategy is currently available.');
-                return;
-            }
-
-            confirmTrainBtn.disabled = true;
-            showResult('Training', 'Training in progress...');
-
-            try {
-                const response = await fetch(`${TRAIN_API_BASE}/api/train`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        strategy,
-                        params: getTrainingParams(),
-                        datasets: serializeLoadedData()
-                    })
-                });
-
-                const result = await response.json();
-                if (!response.ok || !result.ok) {
-                    throw new Error(result.error || 'Train API failed');
+                const quantity = Number(cols[1]);
+                const costPrice = Number(cols[2]);
+                if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(costPrice)) {
+                    errors.push(`第 ${item.idx} 行数值错误，数量需>0，成本价需为数字`);
+                    return null;
                 }
-
-                hasTrainedModel = true;
-                predictBtn.disabled = false;
-                trainModalBackdrop.style.display = 'none';
-                showResult('Training completed', {
-                    model_path: result.model_path,
-                    setup: result.report.setup,
-                    test_metrics: result.report.test_metrics,
-                    baseline_metrics: result.report.baseline_metrics
-                });
-            } catch (err) {
-                const isNetworkError = err instanceof TypeError;
-                const hint = isNetworkError
-                    ? `\n\nPlease start backend API (default ${TRAIN_API_BASE}):\npython ui_train_server.py --host 127.0.0.1 --port 8765`
-                    : '';
-                const msg = `Training failed: ${err.message}${hint}`;
-                showResult('Training failed', msg);
-            } finally {
-                confirmTrainBtn.disabled = false;
-            }
-        }
-
-        async function predictWithTrainedModel() {
-            if (!hasTrainedModel) {
-                showResult('Prediction failed', 'Please train the model first.');
-                return;
-            }
-
-            predictBtn.disabled = true;
-            showResult('Predicting', 'Running prediction...');
-            try {
-                const response = await fetch(`${TRAIN_API_BASE}/api/predict`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ datasets: serializeLoadedData() })
-                });
-                const result = await response.json();
-                if (!response.ok || !result.ok) {
-                    throw new Error(result.error || 'Predict API failed');
-                }
-                showResult('Prediction completed', result.prediction);
-            } catch (err) {
-                showResult('Prediction failed', `Prediction failed: ${err.message}`);
-            } finally {
-                predictBtn.disabled = false;
-            }
-        }
-        
-        async function parseFile(file) {
-            const ext = file.name.split('.').pop().toLowerCase();
-            
-            if (ext === 'csv') {
-                return parseCSV(file);
-            } else if (ext === 'xlsx' || ext === 'xls') {
-                return parseExcel(file);
-            }
-            
-            throw new Error('Unsupported file format');
-        }
-        
-        function parseCSV(file) {
-            return new Promise((resolve, reject) => {
-                Papa.parse(file, {
-                    header: true,
-                    dynamicTyping: true,
-                    skipEmptyLines: true,
-                    complete: (results) => {
-                        const processed = processData(results.data);
-                        resolve(processed);
-                    },
-                    error: (err) => reject(err)
-                });
-            });
-        }
-        
-        function parseExcel(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const workbook = XLSX.read(e.target.result, { type: 'array' });
-                        const sheetName = workbook.SheetNames[0];
-                        const sheet = workbook.Sheets[sheetName];
-                        const data = XLSX.utils.sheet_to_json(sheet);
-                        const processed = processData(data);
-                        resolve(processed);
-                    } catch (err) {
-                        reject(err);
-                    }
+                return {
+                    symbol_or_name: cols[0],
+                    quantity,
+                    cost_price: costPrice
                 };
-                reader.onerror = (err) => reject(err);
-                reader.readAsArrayBuffer(file);
-            });
+            })
+            .filter(Boolean);
+        if (errors.length) {
+            throw new Error(errors.join('；'));
         }
-        
-        function processData(data) {
-            const normalized = [];
-            
-            for (const row of data) {
-                const date = row.date || row.Date || row.DATE;
-                const open = row.open !== undefined ? row.open : (row.Open !== undefined ? row.Open : row.OPEN);
-                const close = row.close !== undefined ? row.close : (row.Close !== undefined ? row.Close : row.CLOSE);
-                const high = row.high !== undefined ? row.high : (row.High !== undefined ? row.High : row.HIGH);
-                const low = row.low !== undefined ? row.low : (row.Low !== undefined ? row.Low : row.LOW);
-                
-                if (date && open !== undefined && close !== undefined && high !== undefined && low !== undefined) {
-                    normalized.push({
-                        date: new Date(date),
-                        open: parseFloat(open),
-                        close: parseFloat(close),
-                        high: parseFloat(high),
-                        low: parseFloat(low)
-                    });
-                }
+        return rows;
+    }
+
+    function renderPortfolio(data) {
+        const p = data.portfolio;
+        portfolioMetrics.innerHTML = `
+            <div class="metric"><div class="k">总资产</div><div class="v">${fmtMoney(p.total_current_value)}</div></div>
+            <div class="metric"><div class="k">持仓以来收益</div><div class="v ${clsBySign(p.since_profit)}">${fmtMoney(p.since_profit)}</div></div>
+            <div class="metric"><div class="k">持仓以来收益率</div><div class="v ${clsBySign(p.since_return_rate)}">${fmtPct(p.since_return_rate)}</div></div>
+            <div class="metric"><div class="k">当日收益</div><div class="v ${clsBySign(p.today_profit)}">${fmtMoney(p.today_profit)}</div></div>
+        `;
+
+        const x = p.curve.map(i => new Date(i.ts * 1000));
+        const y = p.curve.map(i => i.value);
+        Plotly.react('totalChart', [{ x, y, mode: 'lines', line: { color: '#2463eb', width: 2 }, name: '总资产' }], {
+            margin: { l: 48, r: 20, t: 12, b: 36 },
+            xaxis: { type: 'date' },
+            yaxis: { title: '资产价值' },
+            showlegend: false
+        }, { responsive: true, displaylogo: false });
+
+        assetsContainer.innerHTML = '';
+        data.assets.forEach((asset, idx) => {
+            const id = `assetChart_${idx}`;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'asset-item';
+            wrapper.innerHTML = `
+                <h3>${asset.display_name} (${asset.symbol})</h3>
+                <p class="muted">数量: ${asset.quantity} | 成本价: ${fmtMoney(asset.cost_price)} | 最新价: ${fmtMoney(asset.current_price)}</p>
+                <div class="metrics" style="margin-top:6px;">
+                    <div class="metric"><div class="k">持仓收益</div><div class="v ${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</div></div>
+                    <div class="metric"><div class="k">收益率</div><div class="v ${clsBySign(asset.since_return_rate)}">${fmtPct(asset.since_return_rate)}</div></div>
+                    <div class="metric"><div class="k">当日收益</div><div class="v ${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</div></div>
+                </div>
+                <div id="${id}" class="asset-chart"></div>
+            `;
+            assetsContainer.appendChild(wrapper);
+
+            Plotly.react(id, [{
+                x: asset.curve.map(i => new Date(i.ts * 1000)),
+                y: asset.curve.map(i => i.value),
+                mode: 'lines',
+                line: { color: '#fd7e14', width: 2 },
+                name: asset.display_name
+            }], {
+                margin: { l: 40, r: 10, t: 10, b: 28 },
+                xaxis: { type: 'date' },
+                yaxis: { title: '价值' },
+                showlegend: false
+            }, { responsive: true, displaylogo: false });
+        });
+    }
+
+    async function importHoldings(replace) {
+        const rows = parseRows(holdingsInput.value);
+        if (!rows.length) {
+            importResult.textContent = '请输入至少一行持仓。';
+            return;
+        }
+        const r = await fetch(`${apiBase}/api/holdings/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows, replace })
+        });
+        const payload = await r.json();
+        if (!r.ok || !payload.ok) {
+            throw new Error(payload.error || '导入失败');
+        }
+        importResult.textContent = `导入成功：${payload.result.count} 条。`;
+        renderPortfolio(payload.data);
+    }
+
+    async function loadSnapshot() {
+        const r = await fetch(`${apiBase}/api/snapshot`);
+        const payload = await r.json();
+        if (payload.ok) renderPortfolio(payload.data);
+    }
+
+    async function loadInteractionStub() {
+        const r = await fetch(`${apiBase}/api/client-interaction`);
+        const payload = await r.json();
+        if (payload.ok) {
+            const info = payload.data;
+            document.getElementById('interactionInfo').textContent = `${info.message}（能力：${info.capabilities.join(', ')}）`;
+        }
+    }
+
+    function connectEvents() {
+        if (eventSource) eventSource.close();
+        const es = new EventSource(`${apiBase}/api/events`);
+        eventSource = es;
+
+        es.addEventListener('snapshot', (evt) => {
+            connDot.className = 'status-dot ok';
+            connText.textContent = '实时连接正常';
+            try {
+                renderPortfolio(JSON.parse(evt.data));
+            } catch (e) {
+                console.error('snapshot parse failed', e);
             }
-            
-            normalized.sort((a, b) => a.date - b.date);
-            return normalized;
-        }
-        
-        function getCandleWidthForRange(range) {
-            const visibleDuration = range[1] - range[0];
-            const targetCandles = 30;
-            const width = Math.max(20 * 3600 * 1000, (visibleDuration / targetCandles) * 0.7);
-            return width;
-        }
-        
-        function renderCharts() {
-            chartsContainer.innerHTML = '';
-            
-            if (loadedData.length === 0) {
-                chartsContainer.innerHTML = '<div class="error">No valid data found. Please ensure your files contain columns: date, open, close, high, low</div>';
-                return;
-            }
-            
-            const allDates = loadedData.flatMap(d => d.data.map(x => x.date.getTime()));
-            globalMinDate = Math.min(...allDates);
-            globalMaxDate = Math.max(...allDates);
-            
-            const chartsWrapper = document.createElement('div');
-            chartsWrapper.className = 'charts-wrapper';
-            
-            const crosshairLine = document.createElement('div');
-            crosshairLine.className = 'crosshair-line';
-            chartsWrapper.appendChild(crosshairLine);
-            
-            chartsContainer.appendChild(chartsWrapper);
-            
-            loadedData.forEach((item, index) => {
-                const chartWrapper = document.createElement('div');
-                chartWrapper.className = 'chart-wrapper';
-                chartWrapper.innerHTML = `
-                    <div class="chart-title">
-                        <span>${item.name}</span>
-                        <button class="remove-btn" onclick="removeChart(${index})">Remove</button>
-                    </div>
-                    <div class="chart" id="chart-${index}"></div>
-                `;
-                chartsWrapper.appendChild(chartWrapper);
-                
-                renderCandlestickChart(item.data, item.name, index);
-            });
-            
-            setTimeout(() => setupCrosshair(chartsWrapper, crosshairLine), 100);
-            setTimeout(setupSync, 100);
-        }
-        
-        function renderCandlestickChart(data, filename, index) {
-            const dates = data.map(d => d.date);
-            const opens = data.map(d => d.open);
-            const highs = data.map(d => d.high);
-            const lows = data.map(d => d.low);
-            const closes = data.map(d => d.close);
-            
-            const initialCandleWidth = getCandleWidthForRange([globalMinDate, globalMaxDate]);
-            
-            const trace = {
-                x: dates,
-                close: closes,
-                decreasing: { line: { color: '#4CAF50' }, fill: '#4CAF50' },
-                high: highs,
-                increasing: { line: { color: '#F44336' }, fill: '#F44336' },
-                low: lows,
-                open: opens,
-                type: 'candlestick',
-                xaxis: 'x',
-                yaxis: 'y',
-                name: filename,
-                width: initialCandleWidth
-            };
-            
-            const xaxisConfig = {
-                type: 'date',
-                range: [globalMinDate, globalMaxDate],
-                showgrid: false,
-                zeroline: false,
-                showspikes: false
-            };
-            
-            const layout = {
-                dragmode: 'pan',
-                margin: { l: 60, r: 20, t: 20, b: 30 },
-                xaxis: xaxisConfig,
-                yaxis: {
-                    showgrid: true,
-                    gridcolor: '#eee',
-                    zeroline: false,
-                    spikedash: 'solid',
-                    spikecolor: '#666',
-                    spikethickness: 1,
-                    showspikes: true,
-                    spikesnap: 'cursor',
-                    title: 'Price',
-                    autorange: true
-                },
-                showlegend: false,
-                plot_bgcolor: '#fff',
-                paper_bgcolor: '#fff',
-                hovermode: 'x unified'
-            };
-            
-            const config = {
-                responsive: true,
-                displayModeBar: true,
-                modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
-                displaylogo: false
-            };
-            
-            Plotly.newPlot(`chart-${index}`, [trace], layout, config);
-        }
-        
-        function setupCrosshair(chartsWrapper, crosshairLine) {
-            let ticking = false;
-            let targetX = 0;
-            let isVisible = false;
-            
-            const updateCrosshair = () => {
-                if (isVisible) {
-                    crosshairLine.style.transform = `translateX(${targetX}px)`;
-                    crosshairLine.style.display = 'block';
-                }
-                ticking = false;
-            };
-            
-            chartsWrapper.addEventListener('mousemove', (e) => {
-                const rect = chartsWrapper.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                
-                if (x >= 0 && x <= rect.width) {
-                    targetX = x;
-                    isVisible = true;
-                } else {
-                    isVisible = false;
-                }
-                
-                if (!ticking) {
-                    requestAnimationFrame(updateCrosshair);
-                    ticking = true;
-                }
-            });
-            
-            chartsWrapper.addEventListener('mouseleave', () => {
-                isVisible = false;
-                crosshairLine.style.display = 'none';
-            });
-        }
-        
-        function setupSync() {
-            const chartIds = loadedData.map((_, i) => `chart-${i}`);
-            
-            chartIds.forEach(chartId => {
-                const chartDiv = document.getElementById(chartId);
-                
-                chartDiv.on('plotly_relayout', function(eventData) {
-                    if (isSyncing) return;
-                    
-                    let newRange = null;
-                    
-                    if (eventData['xaxis.range[0]'] !== undefined && eventData['xaxis.range[1]'] !== undefined) {
-                        newRange = [eventData['xaxis.range[0]'], eventData['xaxis.range[1]']];
-                    } else if (eventData['xaxis.range']) {
-                        newRange = eventData['xaxis.range'];
-                    }
-                    
-                    if (!newRange || !newRange[0] || !newRange[1]) return;
-                    
-                    const newWidth = getCandleWidthForRange(newRange);
-                    
-                    const visibleStart = new Date(newRange[0]);
-                    const visibleEnd = new Date(newRange[1]);
-                    
-                    isSyncing = true;
-                    
-                    chartIds.forEach((otherId, idx) => {
-                        const otherData = loadedData[idx].data;
-                        const otherVisible = otherData.filter(d => 
-                            d.date >= visibleStart && d.date <= visibleEnd
-                        );
-                        
-                        let yRange = null;
-                        if (otherVisible.length > 0) {
-                            const minP = Math.min(...otherVisible.map(d => d.low));
-                            const maxP = Math.max(...otherVisible.map(d => d.high));
-                            const pad = (maxP - minP) * 0.1 || 1;
-                            yRange = [minP - pad, maxP + pad];
-                        }
-                        
-                        const update = {
-                            'xaxis.range': newRange
-                        };
-                        
-                        if (yRange) {
-                            update['yaxis.range'] = yRange;
-                        }
-                        
-                        Plotly.relayout(otherId, update);
-                        Plotly.restyle(otherId, { width: newWidth });
-                    });
-                    
-                    setTimeout(() => { isSyncing = false; }, 100);
-                });
-            });
-        }
-        
-        function removeChart(index) {
-            loadedData.splice(index, 1);
-            renderCharts();
-            openTrainDialogBtn.disabled = loadedData.length === 0;
-            if (loadedData.length === 0) {
-                hasTrainedModel = false;
-                predictBtn.disabled = true;
-            }
-        }
-    </script>
+        });
+
+        es.onerror = () => {
+            connDot.className = 'status-dot err';
+            connText.textContent = '连接中断，自动重连...';
+        };
+    }
+
+    document.getElementById('importBtn').addEventListener('click', () => importHoldings(true).catch(e => {
+        importResult.textContent = e.message;
+    }));
+
+    document.getElementById('appendBtn').addEventListener('click', () => importHoldings(false).catch(e => {
+        importResult.textContent = e.message;
+    }));
+
+    document.getElementById('goldCaseBtn').addEventListener('click', () => {
+        holdingsInput.value = DEFAULT_GOLD_CASE;
+    });
+
+    document.getElementById('refreshInteractionBtn').addEventListener('click', () => {
+        loadInteractionStub();
+    });
+
+    loadSnapshot();
+    loadInteractionStub();
+    holdingsInput.value = DEFAULT_GOLD_CASE;
+    connectEvents();
+</script>
 </body>
 </html>
