@@ -180,9 +180,11 @@ class PortfolioState:
             raise ValueError("No numeric price in payload")
         current = candidates[0]
         day_open = candidates[1] if len(candidates) > 1 else current
-        if current <= 0:
-            raise ValueError("No valid domestic quote price")
         return {"current": float(current), "day_open": float(day_open), "points": []}
+
+    @staticmethod
+    def _tail_errors(errors: List[str]) -> List[str]:
+        return errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors
 
     def _fetch_curve_from_chart(self, url: str) -> Dict[str, Any]:
         parsed = self._request_json(url)
@@ -278,7 +280,7 @@ class PortfolioState:
             except Exception as exc:
                 errors.append(f"akshare:{exc}")
 
-        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors))
+        detail = " | ".join(filter(None, self._tail_errors(errors)))
         raise ValueError(detail or "domestic quote failed")
 
     def fetch_curve(self, symbol: str) -> Dict[str, Any]:
@@ -302,7 +304,7 @@ class PortfolioState:
         except Exception as exc:
             errors.append(str(exc))
 
-        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors))
+        detail = " | ".join(filter(None, self._tail_errors(errors)))
         raise ValueError(f"{symbol} 行情获取失败: {detail or '网络连接异常'}")
 
     def update_market_data(self) -> None:
