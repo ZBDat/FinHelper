@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -13,6 +14,11 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    import akshare as ak  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    ak = None
 
 
 ROOT = Path(__file__).resolve().parent
@@ -25,6 +31,16 @@ YAHOO_CHART_ENDPOINTS = (
     "https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d",
 )
 YAHOO_QUOTE_ENDPOINT = "https://query2.finance.yahoo.com/v7/finance/quote?symbols={encoded}"
+TENCENT_QUOTE_ENDPOINT = "https://qt.gtimg.cn/q={code}"
+SINA_QUOTE_ENDPOINT = "https://hq.sinajs.cn/list={code}"
+MAX_ERROR_MESSAGES = 4
+DOMESTIC_SYMBOLS = {
+    "XAUUSD=X": {
+        "tencent": ["hf_XAU", "hf_GC"],
+        "sina": ["hf_XAU", "hf_GC"],
+        "akshare": ["AU9999", "GC"],
+    }
+}
 
 
 SYMBOL_ALIASES = {
@@ -144,6 +160,27 @@ class PortfolioState:
             points.append({"ts": int(ts), "price": float(px)})
         return points
 
+    @staticmethod
+    def _extract_reliable_prices(raw: str) -> Dict[str, float]:
+        values = []
+        for token in re.split(r"[,\s~\"]+", raw):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                values.append(float(token))
+            except ValueError:
+                continue
+        preferred = [v for v in values if 100 <= v <= 10000]
+        candidates = preferred or [v for v in values if 0 < v < 1000000]
+        if not candidates:
+            raise ValueError("No numeric price in payload")
+        current = candidates[0]
+        day_open = candidates[1] if len(candidates) > 1 else current
+        if current <= 0:
+            raise ValueError("No valid domestic quote price")
+        return {"current": float(current), "day_open": float(day_open), "points": []}
+
     def _fetch_curve_from_chart(self, url: str) -> Dict[str, Any]:
         parsed = self._request_json(url)
         chart = parsed.get("chart", {})
@@ -172,6 +209,75 @@ class PortfolioState:
             raise ValueError("No valid quote price")
         return {"current": current, "day_open": day_open, "points": []}
 
+    def _fetch_curve_from_tencent(self, code: str) -> Dict[str, Any]:
+        req = urllib.request.Request(TENCENT_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        return self._extract_reliable_prices(raw)
+
+    def _fetch_curve_from_sina(self, code: str) -> Dict[str, Any]:
+        req = urllib.request.Request(SINA_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read().decode("gbk", errors="ignore")
+        return self._extract_reliable_prices(raw)
+
+    def _fetch_curve_from_akshare(self, symbol: str) -> Dict[str, Any]:
+        if ak is None:
+            raise ValueError("akshare unavailable")
+
+        if hasattr(ak, "spot_hist_sge") and symbol.upper() in {"AU9999", "AU99.99"}:
+            df = ak.spot_hist_sge(symbol="Au99.99")
+            if df is not None and not df.empty:
+                row = df.iloc[-1].to_dict()
+                close = (
+                    row.get("收盘")
+                    or row.get("close")
+                    or row.get("最新价")
+                    or row.get("price")
+                    or row.get("价格")
+                )
+                if close is not None:
+                    current = float(close)
+                    return {"current": current, "day_open": current, "points": []}
+
+        if hasattr(ak, "futures_foreign_hist"):
+            df = ak.futures_foreign_hist(symbol=symbol)
+            if df is not None and not df.empty:
+                row = df.iloc[-1].to_dict()
+                close = row.get("close") or row.get("收盘") or row.get("最新价")
+                open_px = row.get("open") or row.get("开盘") or close
+                if close is not None:
+                    return {"current": float(close), "day_open": float(open_px), "points": []}
+
+        raise ValueError("akshare no usable quote")
+
+    def _fetch_curve_from_domestic(self, symbol: str) -> Dict[str, Any]:
+        conf = DOMESTIC_SYMBOLS.get(symbol)
+        if not conf:
+            raise ValueError("No domestic mapping")
+        errors: List[str] = []
+
+        for code in conf.get("tencent", []):
+            try:
+                return self._fetch_curve_from_tencent(code)
+            except Exception as exc:
+                errors.append(f"tencent:{exc}")
+
+        for code in conf.get("sina", []):
+            try:
+                return self._fetch_curve_from_sina(code)
+            except Exception as exc:
+                errors.append(f"sina:{exc}")
+
+        for ak_symbol in conf.get("akshare", []):
+            try:
+                return self._fetch_curve_from_akshare(ak_symbol)
+            except Exception as exc:
+                errors.append(f"akshare:{exc}")
+
+        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:]))
+        raise ValueError(detail or "domestic quote failed")
+
     def fetch_curve(self, symbol: str) -> Dict[str, Any]:
         encoded = urllib.parse.quote(symbol)
         errors: List[str] = []
@@ -188,7 +294,12 @@ class PortfolioState:
         except Exception as exc:
             errors.append(str(exc))
 
-        detail = " | ".join(filter(None, errors[-3:]))
+        try:
+            return self._fetch_curve_from_domestic(symbol)
+        except Exception as exc:
+            errors.append(str(exc))
+
+        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:]))
         raise ValueError(f"{symbol} 行情获取失败: {detail or '网络连接异常'}")
 
     def update_market_data(self) -> None:
