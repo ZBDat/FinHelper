@@ -68,9 +68,9 @@ jobs:
           set -e
           cd /opt/finhelper
           python3 -m py_compile portfolio_server.py
-          pkill -f "python3 portfolio_server.py" || true
+          pkill -f "^python3 .*portfolio_server.py( |$)" || true
           for i in 1 2 3 4 5; do
-            if ! pgrep -f "python3 portfolio_server.py" >/dev/null; then
+            if ! pgrep -f "^python3 .*portfolio_server.py( |$)" >/dev/null; then
               break
             fi
             sleep 1

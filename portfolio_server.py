@@ -166,6 +166,7 @@ class PortfolioState:
     @staticmethod
     def _extract_reliable_prices(raw: str) -> Dict[str, float]:
         values = []
+        # Tencent 行情串常用 "~" 分隔，Sina 常用 "," 分隔，这里统一拆分。
         for token in re.split(r"[,\s~\"]+", raw):
             token = token.strip()
             if not token:
@@ -217,20 +218,22 @@ class PortfolioState:
     def _fetch_curve_from_tencent(self, code: str) -> Dict[str, Any]:
         req = urllib.request.Request(TENCENT_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
         with urllib.request.urlopen(req, timeout=8) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+            raw = resp.read().decode("utf-8", errors="replace")
         return self._extract_reliable_prices(raw)
 
     def _fetch_curve_from_sina(self, code: str) -> Dict[str, Any]:
         req = urllib.request.Request(SINA_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
         with urllib.request.urlopen(req, timeout=8) as resp:
-            raw = resp.read().decode("gbk", errors="ignore")
+            raw = resp.read().decode("gbk", errors="replace")
         return self._extract_reliable_prices(raw)
 
     def _fetch_curve_from_akshare(self, symbol: str) -> Dict[str, Any]:
         if ak is None:
             raise ValueError("akshare unavailable")
 
-        if hasattr(ak, "spot_hist_sge") and symbol.upper() in {"AU9999", "AU99.99"}:
+        normalized = symbol.upper().replace(".", "")
+
+        if hasattr(ak, "spot_hist_sge") and normalized == "AU9999":
             df = ak.spot_hist_sge(symbol="Au99.99")
             if df is not None and not df.empty:
                 row = df.iloc[-1].to_dict()
