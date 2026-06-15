@@ -76,4 +76,6 @@ jobs:
             sleep 1
           done
           nohup python3 portfolio_server.py --host 0.0.0.0 --port 8877 > portfolio_server.log 2>&1 &
+          sleep 2
+          pgrep -f "^python3 .*portfolio_server.py( |$)" >/dev/null
           EOF

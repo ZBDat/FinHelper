@@ -37,6 +37,14 @@ MAX_ERROR_MESSAGES = 4
 PREFERRED_PRICE_MIN = 100.0
 PREFERRED_PRICE_MAX = 10000.0
 FALLBACK_PRICE_MAX = 1000000.0
+FETCH_EXCEPTIONS = (
+    ValueError,
+    urllib.error.URLError,
+    urllib.error.HTTPError,
+    json.JSONDecodeError,
+    KeyError,
+    TypeError,
+)
 DOMESTIC_SYMBOLS = {
     "XAUUSD=X": {
         "tencent": ["hf_XAU", "hf_GC"],
@@ -164,7 +172,7 @@ class PortfolioState:
         return points
 
     @staticmethod
-    def _extract_reliable_prices(raw: str) -> Dict[str, float]:
+    def _extract_reliable_prices(raw: str) -> Dict[str, Any]:
         values = []
         # Tencent 行情串常用 "~" 分隔，Sina 常用 "," 分隔，这里统一拆分。
         for token in re.split(r"[,\s~\"]+", raw):
@@ -181,7 +189,7 @@ class PortfolioState:
             raise ValueError("No numeric price in payload")
         current = candidates[0]
         day_open = candidates[1] if len(candidates) > 1 else current
-        return {"current": float(current), "day_open": float(day_open), "points": []}
+        return {"current": current, "day_open": day_open, "points": []}
 
     @staticmethod
     def _tail_errors(errors: List[str]) -> List[str]:
@@ -268,19 +276,19 @@ class PortfolioState:
         for code in conf.get("tencent", []):
             try:
                 return self._fetch_curve_from_tencent(code)
-            except Exception as exc:
+            except FETCH_EXCEPTIONS as exc:
                 errors.append(f"tencent:{exc}")
 
         for code in conf.get("sina", []):
             try:
                 return self._fetch_curve_from_sina(code)
-            except Exception as exc:
+            except FETCH_EXCEPTIONS as exc:
                 errors.append(f"sina:{exc}")
 
         for ak_symbol in conf.get("akshare", []):
             try:
                 return self._fetch_curve_from_akshare(ak_symbol)
-            except Exception as exc:
+            except FETCH_EXCEPTIONS as exc:
                 errors.append(f"akshare:{exc}")
 
         detail = " | ".join(filter(None, self._tail_errors(errors)))
@@ -294,17 +302,17 @@ class PortfolioState:
             url = pattern.format(encoded=encoded)
             try:
                 return self._fetch_curve_from_chart(url)
-            except Exception as exc:
+            except FETCH_EXCEPTIONS as exc:
                 errors.append(str(exc))
 
         try:
             return self._fetch_curve_from_quote(encoded)
-        except Exception as exc:
+        except FETCH_EXCEPTIONS as exc:
             errors.append(str(exc))
 
         try:
             return self._fetch_curve_from_domestic(symbol)
-        except Exception as exc:
+        except FETCH_EXCEPTIONS as exc:
             errors.append(str(exc))
 
         detail = " | ".join(filter(None, self._tail_errors(errors)))
