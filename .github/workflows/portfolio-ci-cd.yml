@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   TARGET_HOST: 120.55.1.225
   TARGET_PORT: 22
@@ -66,5 +69,11 @@ jobs:
           cd /opt/finhelper
           python3 -m py_compile portfolio_server.py
           pkill -f "python3 portfolio_server.py" || true
+          for i in 1 2 3 4 5; do
+            if ! pgrep -f "python3 portfolio_server.py" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
           nohup python3 portfolio_server.py --host 0.0.0.0 --port 8877 > portfolio_server.log 2>&1 &
           EOF

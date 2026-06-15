@@ -34,6 +34,9 @@ YAHOO_QUOTE_ENDPOINT = "https://query2.finance.yahoo.com/v7/finance/quote?symbol
 TENCENT_QUOTE_ENDPOINT = "https://qt.gtimg.cn/q={code}"
 SINA_QUOTE_ENDPOINT = "https://hq.sinajs.cn/list={code}"
 MAX_ERROR_MESSAGES = 4
+PREFERRED_PRICE_MIN = 100.0
+PREFERRED_PRICE_MAX = 10000.0
+FALLBACK_PRICE_MAX = 1000000.0
 DOMESTIC_SYMBOLS = {
     "XAUUSD=X": {
         "tencent": ["hf_XAU", "hf_GC"],
@@ -171,8 +174,8 @@ class PortfolioState:
                 values.append(float(token))
             except ValueError:
                 continue
-        preferred = [v for v in values if 100 <= v <= 10000]
-        candidates = preferred or [v for v in values if 0 < v < 1000000]
+        preferred = [v for v in values if PREFERRED_PRICE_MIN <= v <= PREFERRED_PRICE_MAX]
+        candidates = preferred or [v for v in values if 0 < v < FALLBACK_PRICE_MAX]
         if not candidates:
             raise ValueError("No numeric price in payload")
         current = candidates[0]
@@ -275,7 +278,7 @@ class PortfolioState:
             except Exception as exc:
                 errors.append(f"akshare:{exc}")
 
-        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:]))
+        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors))
         raise ValueError(detail or "domestic quote failed")
 
     def fetch_curve(self, symbol: str) -> Dict[str, Any]:
@@ -299,7 +302,7 @@ class PortfolioState:
         except Exception as exc:
             errors.append(str(exc))
 
-        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:]))
+        detail = " | ".join(filter(None, errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors))
         raise ValueError(f"{symbol} 行情获取失败: {detail or '网络连接异常'}")
 
     def update_market_data(self) -> None:
