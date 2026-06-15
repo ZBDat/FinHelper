@@ -20,6 +20,11 @@ STATIC_INDEX = ROOT / "index.html"
 DEFAULT_HEADERS = {"User-Agent": "FinHelper/1.0"}
 MIN_POLL_INTERVAL = 5
 DEFAULT_GOLD_TEST_COST = 2300.0
+YAHOO_CHART_ENDPOINTS = (
+    "https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d",
+    "https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d",
+)
+YAHOO_QUOTE_ENDPOINT = "https://query2.finance.yahoo.com/v7/finance/quote?symbols={encoded}"
 
 
 SYMBOL_ALIASES = {
@@ -115,23 +120,17 @@ class PortfolioState:
         for sub in stale:
             self.unregister_subscriber(sub)
 
-    def fetch_curve(self, symbol: str) -> Dict[str, Any]:
-        encoded = urllib.parse.quote(symbol)
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d"
+    def _request_json(self, url: str) -> Dict[str, Any]:
         req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
         try:
             with urllib.request.urlopen(req, timeout=8) as resp:
                 body = resp.read()
         except urllib.error.URLError as exc:
-            raise ValueError(f"{symbol} 行情获取失败: 网络连接异常") from exc
-        parsed = json.loads(body.decode("utf-8"))
-        chart = parsed.get("chart", {})
-        if chart.get("error"):
-            raise ValueError(str(chart["error"]))
-        result = (chart.get("result") or [None])[0]
-        if not result:
-            raise ValueError("No chart result")
+            raise ValueError("网络连接异常") from exc
+        return json.loads(body.decode("utf-8"))
 
+    @staticmethod
+    def _build_points(result: Dict[str, Any]) -> List[Dict[str, float]]:
         timestamps = result.get("timestamp") or []
         quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
         closes = quote.get("close") or []
@@ -143,13 +142,54 @@ class PortfolioState:
             if px is None:
                 continue
             points.append({"ts": int(ts), "price": float(px)})
+        return points
 
+    def _fetch_curve_from_chart(self, url: str) -> Dict[str, Any]:
+        parsed = self._request_json(url)
+        chart = parsed.get("chart", {})
+        if chart.get("error"):
+            raise ValueError(str(chart["error"]))
+        result = (chart.get("result") or [None])[0]
+        if not result:
+            raise ValueError("No chart result")
+
+        points = self._build_points(result)
         meta = result.get("meta") or {}
         current = float(meta.get("regularMarketPrice") or (points[-1]["price"] if points else 0.0))
         day_open = points[0]["price"] if points else current
         if current <= 0:
             raise ValueError("No valid market price")
         return {"current": current, "day_open": day_open, "points": points}
+
+    def _fetch_curve_from_quote(self, encoded: str) -> Dict[str, Any]:
+        parsed = self._request_json(YAHOO_QUOTE_ENDPOINT.format(encoded=encoded))
+        result = ((parsed.get("quoteResponse") or {}).get("result") or [None])[0]
+        if not result:
+            raise ValueError("No quote result")
+        current = float(result.get("regularMarketPrice") or 0.0)
+        day_open = float(result.get("regularMarketOpen") or current)
+        if current <= 0:
+            raise ValueError("No valid quote price")
+        return {"current": current, "day_open": day_open, "points": []}
+
+    def fetch_curve(self, symbol: str) -> Dict[str, Any]:
+        encoded = urllib.parse.quote(symbol)
+        errors: List[str] = []
+
+        for pattern in YAHOO_CHART_ENDPOINTS:
+            url = pattern.format(encoded=encoded)
+            try:
+                return self._fetch_curve_from_chart(url)
+            except Exception as exc:
+                errors.append(str(exc))
+
+        try:
+            return self._fetch_curve_from_quote(encoded)
+        except Exception as exc:
+            errors.append(str(exc))
+
+        detail = " | ".join(filter(None, errors[-3:]))
+        raise ValueError(f"{symbol} 行情获取失败: {detail or '网络连接异常'}")
 
     def update_market_data(self) -> None:
         with self._lock:
