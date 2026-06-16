@@ -23,13 +23,7 @@
             color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        .page {
-            max-width: 1320px;
-            margin: 0 auto;
-            padding: 12px;
-            display: grid;
-            gap: 12px;
-        }
+        .page { width: 100%; padding: 10px 14px; display: grid; gap: 12px; }
         .card {
             background: var(--card);
             border: 1px solid var(--line);
@@ -47,11 +41,13 @@
         h1 { font-size: 20px; }
         h2 { font-size: 16px; margin-bottom: 8px; }
         .muted { color: var(--muted); font-size: 13px; }
-        .grid-2 {
+        .workspace {
             display: grid;
             gap: 12px;
-            grid-template-columns: 2fr 1fr;
+            grid-template-columns: minmax(300px, 1.2fr) minmax(480px, 2fr) minmax(260px, 1fr);
+            align-items: start;
         }
+        .stack { display: grid; gap: 12px; }
         textarea {
             width: 100%;
             min-height: 120px;
@@ -91,16 +87,37 @@
         .assets {
             display: grid;
             gap: 10px;
-            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            grid-template-columns: 1fr;
         }
         .asset-item {
             border: 1px solid var(--line);
             border-radius: 8px;
-            padding: 10px;
+            padding: 8px;
             background: #fff;
         }
-        .chart { width: 100%; height: 340px; }
-        .asset-chart { width: 100%; height: 250px; margin-top: 8px; }
+        .chart { width: 100%; height: 280px; }
+        .asset-chart { width: 100%; height: 170px; margin-top: 6px; }
+        .side-list {
+            display: grid;
+            gap: 8px;
+            max-height: 560px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+        .side-item {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #fbfcff;
+            padding: 8px;
+        }
+        .side-item .line {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 4px;
+            font-size: 13px;
+        }
+        .price-value { font-size: 20px; font-weight: 700; text-align: right; }
         .status-dot {
             width: 10px;
             height: 10px;
@@ -112,9 +129,10 @@
         .status-dot.err { background: #cc3f3f; }
 
         @media (max-width: 860px) {
-            .grid-2 { grid-template-columns: 1fr; }
+            .workspace { grid-template-columns: 1fr; }
             .chart { height: 290px; }
             .asset-chart { height: 220px; }
+            .side-list { max-height: none; }
         }
     </style>
 </head>
@@ -133,38 +151,50 @@
         </div>
     </div>
 
-    <div class="grid-2">
-        <div class="card">
-            <h2>导入持仓（名称或代码）</h2>
-            <p class="muted">每行：名称/代码, 数量, 成本价。示例已包含现货黄金测试用例。</p>
-            <textarea id="holdingsInput"></textarea>
-            <div class="btns">
-                <button id="importBtn">导入并替换持仓</button>
-                <button class="secondary" id="appendBtn">追加持仓</button>
-                <button class="secondary" id="goldCaseBtn">填入现货黄金示例</button>
+    <div class="workspace">
+        <div class="stack">
+            <div class="card">
+                <h2>持仓信息（左侧）</h2>
+                <div id="holdingsBoard" class="side-list"></div>
             </div>
-            <p class="muted" id="importResult" style="margin-top:8px;"></p>
+            <div class="card">
+                <h2>导入持仓（名称或代码）</h2>
+                <p class="muted">每行：名称/代码, 数量, 成本价。示例已包含现货黄金测试用例。</p>
+                <textarea id="holdingsInput"></textarea>
+                <div class="btns">
+                    <button id="importBtn">导入并替换持仓</button>
+                    <button class="secondary" id="appendBtn">追加持仓</button>
+                    <button class="secondary" id="goldCaseBtn">填入现货黄金示例</button>
+                </div>
+                <p class="muted" id="importResult" style="margin-top:8px;"></p>
+            </div>
+        </div>
+
+        <div class="stack">
+            <div class="card">
+                <h2>总资产实时指标</h2>
+                <div class="metrics" id="portfolioMetrics"></div>
+                <div id="totalChart" class="chart"></div>
+            </div>
+            <div class="card">
+                <h2>各资产曲线</h2>
+                <div id="assetsContainer" class="assets"></div>
+            </div>
         </div>
 
         <div class="card">
-            <h2>客户交互（预留）</h2>
-            <p class="muted" id="interactionInfo">加载中...</p>
-            <div class="btns">
-                <button class="secondary" id="refreshInteractionBtn">刷新预留能力</button>
-            </div>
-            <p class="muted" style="margin-top:8px;">后续可接入登录、消息、指令回传，此面板独立于图表区，避免冲突。</p>
+            <h2>资产价格（右侧）</h2>
+            <div id="priceBoard" class="side-list"></div>
         </div>
     </div>
 
     <div class="card">
-        <h2>总资产实时指标</h2>
-        <div class="metrics" id="portfolioMetrics"></div>
-        <div id="totalChart" class="chart"></div>
-    </div>
-
-    <div class="card">
-        <h2>各资产实时指标与曲线</h2>
-        <div id="assetsContainer" class="assets"></div>
+        <h2>客户交互（预留，底部）</h2>
+        <p class="muted" id="interactionInfo">加载中...</p>
+        <div class="btns">
+            <button class="secondary" id="refreshInteractionBtn">刷新预留能力</button>
+        </div>
+        <p class="muted" style="margin-top:8px;">后续可接入登录、消息、指令回传，此面板独立于图表区，避免冲突。</p>
     </div>
 </div>
 
@@ -175,6 +205,8 @@
     const importResult = document.getElementById('importResult');
     const portfolioMetrics = document.getElementById('portfolioMetrics');
     const assetsContainer = document.getElementById('assetsContainer');
+    const holdingsBoard = document.getElementById('holdingsBoard');
+    const priceBoard = document.getElementById('priceBoard');
     const holdingsInput = document.getElementById('holdingsInput');
     const DEFAULT_GOLD_CASE = '现货黄金,1,2300';
 
@@ -237,6 +269,25 @@
             showlegend: false
         }, { responsive: true, displaylogo: false });
 
+        holdingsBoard.innerHTML = data.assets.map(asset => `
+            <div class="side-item">
+                <h3>${asset.display_name} (${asset.symbol})</h3>
+                <div class="line"><span class="muted">持仓数量</span><span>${asset.quantity}</span></div>
+                <div class="line"><span class="muted">成本价</span><span>${fmtMoney(asset.cost_price)}</span></div>
+                <div class="line"><span class="muted">持仓市值</span><span>${fmtMoney(asset.current_value)}</span></div>
+                <div class="line"><span class="muted">持仓收益</span><span class="${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</span></div>
+            </div>
+        `).join('') || '<p class="muted">暂无持仓数据</p>';
+
+        priceBoard.innerHTML = data.assets.map(asset => `
+            <div class="side-item">
+                <h3>${asset.display_name}</h3>
+                <div class="price-value ${clsBySign(asset.today_profit)}">${fmtMoney(asset.current_price)}</div>
+                <div class="line"><span class="muted">当日盈亏</span><span class="${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</span></div>
+                <div class="line"><span class="muted">持仓收益率</span><span class="${clsBySign(asset.since_return_rate)}">${fmtPct(asset.since_return_rate)}</span></div>
+            </div>
+        `).join('') || '<p class="muted">暂无价格数据</p>';
+
         assetsContainer.innerHTML = '';
         data.assets.forEach((asset, idx) => {
             const id = `assetChart_${idx}`;
@@ -244,12 +295,7 @@
             wrapper.className = 'asset-item';
             wrapper.innerHTML = `
                 <h3>${asset.display_name} (${asset.symbol})</h3>
-                <p class="muted">数量: ${asset.quantity} | 成本价: ${fmtMoney(asset.cost_price)} | 最新价: ${fmtMoney(asset.current_price)}</p>
-                <div class="metrics" style="margin-top:6px;">
-                    <div class="metric"><div class="k">持仓收益</div><div class="v ${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</div></div>
-                    <div class="metric"><div class="k">收益率</div><div class="v ${clsBySign(asset.since_return_rate)}">${fmtPct(asset.since_return_rate)}</div></div>
-                    <div class="metric"><div class="k">当日收益</div><div class="v ${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</div></div>
-                </div>
+                <p class="muted">持仓收益: <span class="${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</span> | 当日收益: <span class="${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</span></p>
                 <div id="${id}" class="asset-chart"></div>
             `;
             assetsContainer.appendChild(wrapper);
