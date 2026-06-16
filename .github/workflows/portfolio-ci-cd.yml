@@ -64,7 +64,7 @@ jobs:
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -p "$TARGET_PORT" "$DEPLOY_USER@$TARGET_HOST" <<'EOF'
+          ssh -p "$TARGET_PORT" "$DEPLOY_USER@$TARGET_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'EOF'
           set -e
           cd "$DEPLOY_PATH"
           python3 -m py_compile portfolio_server.py
