@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5.1.1
@@ -35,7 +35,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Prepare SSH
         env:
@@ -60,6 +60,8 @@ jobs:
           case "$DEPLOY_PATH" in
             *[!A-Za-z0-9._/-]* ) echo "DEPLOY_PATH contains unsupported characters"; exit 1 ;;
           esac
+          ssh -p "$TARGET_PORT" "$DEPLOY_USER@$TARGET_HOST" \
+            "sudo mkdir -p '$DEPLOY_PATH' && sudo chown '$DEPLOY_USER':'$DEPLOY_USER' '$DEPLOY_PATH'"
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
