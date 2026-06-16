@@ -52,6 +52,13 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           test -n "$DEPLOY_USER"
+          case "$DEPLOY_PATH" in
+            /*) ;;
+            *) echo "DEPLOY_PATH must be an absolute path"; exit 1 ;;
+          esac
+          case "$DEPLOY_PATH" in
+            *[!A-Za-z0-9._/-]* ) echo "DEPLOY_PATH contains unsupported characters"; exit 1 ;;
+          esac
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
@@ -64,6 +71,13 @@ jobs:
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          case "$DEPLOY_PATH" in
+            /*) ;;
+            *) echo "DEPLOY_PATH must be an absolute path"; exit 1 ;;
+          esac
+          case "$DEPLOY_PATH" in
+            *[!A-Za-z0-9._/-]* ) echo "DEPLOY_PATH contains unsupported characters"; exit 1 ;;
+          esac
           ssh -p "$TARGET_PORT" "$DEPLOY_USER@$TARGET_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'EOF'
           set -e
           cd "$DEPLOY_PATH"
