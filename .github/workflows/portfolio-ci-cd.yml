@@ -61,7 +61,7 @@ jobs:
             *[!A-Za-z0-9._/-]* ) echo "DEPLOY_PATH contains unsupported characters"; exit 1 ;;
           esac
           ssh -p "$TARGET_PORT" "$DEPLOY_USER@$TARGET_HOST" \
-            "sudo mkdir -p '$DEPLOY_PATH' && sudo chown '$DEPLOY_USER':'$DEPLOY_USER' '$DEPLOY_PATH'"
+            "mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
