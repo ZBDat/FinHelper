@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 env:
-  TARGET_HOST: 120.55.1.225
-  TARGET_PORT: 22
-  DEPLOY_PATH: /opt/finhelper
+  TARGET_HOST: ${{ vars.TARGET_HOST || '120.55.1.225' }}
+  TARGET_PORT: ${{ vars.TARGET_PORT || '22' }}
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/finhelper' }}
 
 jobs:
   ci:
