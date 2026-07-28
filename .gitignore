@@ -1,0 +1,92 @@
+# =========================
+# 操作系统生成文件
+# =========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.*.swp
+.*.swo
+.fuse_hidden*
+
+# =========================
+# IDE 和编辑器配置
+# =========================
+.vscode/
+.vs/
+.idea/
+*.code-workspace
+*.iml
+.project
+.cproject
+.settings/
+.classpath
+
+# =========================
+# 编译与构建输出目录
+# =========================
+build/
+dist/
+bin/
+obj/
+out/
+Debug/
+Release/
+output/
+
+# =========================
+# 依赖与包管理
+# =========================
+node_modules/
+dependencies/
+lib/
+*.egg-info/
+*.egg
+
+# =========================
+# 日志文件
+# =========================
+*.log
+*.trace
+logs/
+
+# =========================
+# 临时文件与备份
+# =========================
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# =========================
+# 环境变量与敏感配置
+# =========================
+.env
+.env.local
+.env.*.local
+config.local.js
+
+# =========================
+# 压缩包与二进制文件
+# =========================
+*.zip
+*.tar.gz
+*.7z
+*.rar
+*.exe
+*.dll
+*.so
+*.dylib
