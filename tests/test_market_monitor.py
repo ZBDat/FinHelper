@@ -48,4 +48,4 @@ def test_deepseek_fallback_when_key_missing(monkeypatch) -> None:
     analyzer = DeepSeekFlowAnalyzer()
     result = analyzer.analyze({"market": "us", "summary": "test"})
     assert result["degraded"] is True
-    assert "API Key" in result["error"]
+    assert "DEEPSEEK_API_KEY" in result["error"]
