@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import queue
 import re
 import threading
@@ -15,44 +16,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-try:
-    import akshare as ak  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    ak = None
-
 
 ROOT = Path(__file__).resolve().parent
 STATIC_INDEX = ROOT / "index.html"
-DEFAULT_HEADERS = {"User-Agent": "FinHelper/1.0"}
+DEFAULT_HEADERS = {"User-Agent": "FinHelper/2.0"}
 MIN_POLL_INTERVAL = 5
 DEFAULT_GOLD_TEST_COST = 2300.0
+MAX_ERROR_MESSAGES = 4
+MARKET_RANGE = "6mo"
+MARKET_INTERVAL = "1d"
+
 YAHOO_CHART_ENDPOINTS = (
-    "https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d",
-    "https://query2.finance.yahoo.com/v8/finance/chart/{encoded}?interval=1m&range=1d",
+    f"https://query1.finance.yahoo.com/v8/finance/chart/{{encoded}}?interval={MARKET_INTERVAL}&range={MARKET_RANGE}",
+    f"https://query2.finance.yahoo.com/v8/finance/chart/{{encoded}}?interval={MARKET_INTERVAL}&range={MARKET_RANGE}",
 )
 YAHOO_QUOTE_ENDPOINT = "https://query2.finance.yahoo.com/v7/finance/quote?symbols={encoded}"
-TENCENT_QUOTE_ENDPOINT = "https://qt.gtimg.cn/q={code}"
-SINA_QUOTE_ENDPOINT = "https://hq.sinajs.cn/list={code}"
-MAX_ERROR_MESSAGES = 4
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
+DEEPSEEK_TIMEOUT_SECONDS = 8
+DEEPSEEK_MIN_INTERVAL_SECONDS = 2.0
+
 PREFERRED_PRICE_MIN = 100.0
 PREFERRED_PRICE_MAX = 10000.0
 FALLBACK_PRICE_MAX = 1000000.0
-FETCH_EXCEPTIONS = (
-    ValueError,
-    urllib.error.URLError,
-    urllib.error.HTTPError,
-    json.JSONDecodeError,
-    KeyError,
-    TypeError,
-)
-DOMESTIC_SYMBOLS = {
-    "XAUUSD=X": {
-        "tencent": ["hf_XAU", "hf_GC"],
-        "sina": ["hf_XAU", "hf_GC"],
-        "akshare": ["AU9999", "GC"],
-    }
-}
-
 
 SYMBOL_ALIASES = {
     "现货黄金": "XAUUSD=X",
@@ -62,6 +47,19 @@ SYMBOL_ALIASES = {
     "xauusd=x": "XAUUSD=X",
     "gold": "XAUUSD=X",
 }
+
+FETCH_EXCEPTIONS = (
+    ValueError,
+    urllib.error.URLError,
+    urllib.error.HTTPError,
+    json.JSONDecodeError,
+    KeyError,
+    TypeError,
+)
+
+
+def _tail_errors(errors: List[str]) -> List[str]:
+    return errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors
 
 
 @dataclass
@@ -73,13 +71,134 @@ class Holding:
     imported_at: float
 
 
+@dataclass(frozen=True)
+class IndexConfig:
+    code: str
+    name: str
+    market: str
+    currency: str
+    stat_mode: str
+    stat_divisor: float = 1.0
+
+
+MARKET_CONFIGS: Dict[str, Dict[str, str]] = {
+    "cn": {"name": "A股", "description": "中国大陆主要指数（日K）"},
+    "us": {"name": "美股", "description": "美国主要指数（日K）"},
+    "hk": {"name": "港股", "description": "香港主要指数（日K）"},
+    "eu": {"name": "欧洲", "description": "欧洲主要指数（日K）"},
+}
+
+INDEX_CONFIGS: List[IndexConfig] = [
+    IndexConfig("000001.SS", "上证指数", "cn", "CNY", "index_points", 1.0),
+    IndexConfig("399001.SZ", "深证成指", "cn", "CNY", "index_points", 1.0),
+    IndexConfig("399006.SZ", "创业板指", "cn", "CNY", "index_points", 1.0),
+    IndexConfig("^GSPC", "标普500", "us", "USD", "index_points", 1.0),
+    IndexConfig("^IXIC", "纳斯达克综合", "us", "USD", "index_points", 1.0),
+    IndexConfig("^DJI", "道琼斯工业", "us", "USD", "index_points", 1.0),
+    IndexConfig("^HSI", "恒生指数", "hk", "HKD", "index_points", 1.0),
+    IndexConfig("^HSCI", "恒生科技(代理)", "hk", "HKD", "index_points", 1.0),
+    IndexConfig("^STOXX50E", "Euro Stoxx 50", "eu", "EUR", "index_points", 1.0),
+    IndexConfig("^GDAXI", "DAX", "eu", "EUR", "index_points", 1.0),
+    IndexConfig("^FCHI", "CAC40", "eu", "EUR", "index_points", 1.0),
+]
+
+INDEX_BY_CODE = {item.code: item for item in INDEX_CONFIGS}
+
+
+class DeepSeekFlowAnalyzer:
+    def __init__(self) -> None:
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        self._lock = threading.Lock()
+        self._last_call_ts = 0.0
+
+    def analyze(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            if now - self._last_call_ts < DEEPSEEK_MIN_INTERVAL_SECONDS:
+                return {
+                    "ok": False,
+                    "degraded": True,
+                    "error": "请求过于频繁，请稍后重试",
+                    "last_updated": int(now),
+                }
+            self._last_call_ts = now
+
+        if not self.api_key:
+            return {
+                "ok": False,
+                "degraded": True,
+                "error": "DEEPSEEK_API_KEY 未配置，已返回降级结果",
+                "analysis": "未配置 DeepSeek API Key，暂无法生成资金流解读。",
+                "last_updated": int(now),
+            }
+
+        market = str(payload.get("market") or "all")
+        summary = str(payload.get("summary") or "")[:500]
+        prompt = (
+            "请基于以下指数快照做资金流向分析，输出简洁中文结论，包含风险提示。\\n"
+            f"market={market}\\n"
+            f"summary={summary}"
+        )
+        req_payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "你是金融市场分析助手，输出客观简洁结论。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 500,
+        }
+
+        headers = {
+            "Authorization": "Bearer " + self.api_key,
+            "Content-Type": "application/json",
+            "User-Agent": "FinHelper/2.0",
+        }
+
+        logging.info("DeepSeek request: market=%s summary_len=%s", market, len(summary))
+        req = urllib.request.Request(
+            DEEPSEEK_API_URL,
+            data=json.dumps(req_payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=DEEPSEEK_TIMEOUT_SECONDS) as resp:
+                raw = resp.read().decode("utf-8")
+            parsed = json.loads(raw)
+            content = (((parsed.get("choices") or [{}])[0]).get("message") or {}).get("content")
+            if not content:
+                raise ValueError("empty deepseek response")
+            return {
+                "ok": True,
+                "degraded": False,
+                "analysis": content.strip(),
+                "last_updated": int(time.time()),
+            }
+        except Exception as exc:  # pragma: no cover - network failure path
+            logging.exception("DeepSeek request failed")
+            return {
+                "ok": False,
+                "degraded": True,
+                "error": f"DeepSeek 调用失败: {type(exc).__name__}",
+                "analysis": "资金流分析暂不可用，请稍后重试。",
+                "last_updated": int(time.time()),
+            }
+
+
 class PortfolioState:
-    def __init__(self, poll_interval: int = 10) -> None:
+    def __init__(self, poll_interval: int = 15) -> None:
         self.poll_interval = max(MIN_POLL_INTERVAL, poll_interval)
         self.holdings: Dict[str, Holding] = {}
         self.price_history: Dict[str, List[Dict[str, float]]] = {}
         self.day_open: Dict[str, float] = {}
         self.latest_price: Dict[str, float] = {}
+
+        self.index_snapshots: Dict[str, Dict[str, Any]] = {}
+        self.fx_rates: Dict[str, float] = {"CNY": 1.0, "USD": 7.2, "HKD": 0.92, "EUR": 7.8}
+        self._market_last_update_ts = 0
+
         self.interaction_stub = {
             "has_future_channel": True,
             "message": "预留客户交互通道：后续可接入登录态、会话消息、指令下发，不影响图表渲染。",
@@ -87,14 +206,13 @@ class PortfolioState:
         }
         self._subs: List[queue.Queue[str]] = []
         self._lock = threading.Lock()
+        self.deepseek = DeepSeekFlowAnalyzer()
 
     @staticmethod
     def normalize_symbol(value: str) -> str:
         key = (value or "").strip()
         lower = key.lower()
-        if lower in SYMBOL_ALIASES:
-            return SYMBOL_ALIASES[lower]
-        return key
+        return SYMBOL_ALIASES.get(lower, key)
 
     def import_rows(self, rows: List[Dict[str, Any]], replace: bool = False) -> Dict[str, Any]:
         imported = []
@@ -110,13 +228,7 @@ class PortfolioState:
                 cost_price = float(row.get("cost_price", 0) or 0)
                 if quantity <= 0:
                     continue
-                holding = Holding(
-                    symbol=symbol,
-                    display_name=source,
-                    quantity=quantity,
-                    cost_price=cost_price,
-                    imported_at=time.time(),
-                )
+                holding = Holding(symbol=symbol, display_name=source, quantity=quantity, cost_price=cost_price, imported_at=time.time())
                 self.holdings[symbol] = holding
                 self.price_history.setdefault(symbol, [])
                 imported.append({"symbol": symbol, "display_name": source, "quantity": quantity, "cost_price": cost_price})
@@ -135,7 +247,7 @@ class PortfolioState:
 
     def broadcast_snapshot(self) -> None:
         snapshot = self.snapshot()
-        payload = f"event: snapshot\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+        payload = f"event: snapshot\\ndata: {json.dumps(snapshot, ensure_ascii=False)}\\n\\n"
         stale: List[queue.Queue[str]] = []
         with self._lock:
             targets = list(self._subs)
@@ -157,24 +269,8 @@ class PortfolioState:
         return json.loads(body.decode("utf-8"))
 
     @staticmethod
-    def _build_points(result: Dict[str, Any]) -> List[Dict[str, float]]:
-        timestamps = result.get("timestamp") or []
-        quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
-        closes = quote.get("close") or []
-        points = []
-        for idx, ts in enumerate(timestamps):
-            if idx >= len(closes):
-                continue
-            px = closes[idx]
-            if px is None:
-                continue
-            points.append({"ts": int(ts), "price": float(px)})
-        return points
-
-    @staticmethod
     def _extract_reliable_prices(raw: str) -> Dict[str, Any]:
         values = []
-        # Tencent 行情串常用 "~" 分隔，Sina 常用 "," 分隔，这里统一拆分。
         for token in re.split(r"[,\s~\"]+", raw):
             token = token.strip()
             if not token:
@@ -191,132 +287,70 @@ class PortfolioState:
         day_open = candidates[1] if len(candidates) > 1 else current
         return {"current": current, "day_open": day_open, "points": []}
 
-    @staticmethod
-    def _tail_errors(errors: List[str]) -> List[str]:
-        return errors[-MAX_ERROR_MESSAGES:] if len(errors) > MAX_ERROR_MESSAGES else errors
-
-    def _fetch_curve_from_chart(self, url: str) -> Dict[str, Any]:
-        parsed = self._request_json(url)
-        chart = parsed.get("chart", {})
-        if chart.get("error"):
-            raise ValueError(str(chart["error"]))
-        result = (chart.get("result") or [None])[0]
-        if not result:
-            raise ValueError("No chart result")
-
-        points = self._build_points(result)
-        meta = result.get("meta") or {}
-        current = float(meta.get("regularMarketPrice") or (points[-1]["price"] if points else 0.0))
-        day_open = points[0]["price"] if points else current
-        if current <= 0:
-            raise ValueError("No valid market price")
-        return {"current": current, "day_open": day_open, "points": points}
-
-    def _fetch_curve_from_quote(self, encoded: str) -> Dict[str, Any]:
-        parsed = self._request_json(YAHOO_QUOTE_ENDPOINT.format(encoded=encoded))
-        result = ((parsed.get("quoteResponse") or {}).get("result") or [None])[0]
-        if not result:
-            raise ValueError("No quote result")
-        current = float(result.get("regularMarketPrice") or 0.0)
-        day_open = float(result.get("regularMarketOpen") or current)
-        if current <= 0:
-            raise ValueError("No valid quote price")
-        return {"current": current, "day_open": day_open, "points": []}
-
-    def _fetch_curve_from_tencent(self, code: str) -> Dict[str, Any]:
-        req = urllib.request.Request(TENCENT_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        return self._extract_reliable_prices(raw)
-
-    def _fetch_curve_from_sina(self, code: str) -> Dict[str, Any]:
-        req = urllib.request.Request(SINA_QUOTE_ENDPOINT.format(code=code), headers=DEFAULT_HEADERS)
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            raw = resp.read().decode("gbk", errors="replace")
-        return self._extract_reliable_prices(raw)
-
-    def _fetch_curve_from_akshare(self, symbol: str) -> Dict[str, Any]:
-        if ak is None:
-            raise ValueError("akshare unavailable")
-
-        normalized = symbol.upper().replace(".", "")
-
-        if hasattr(ak, "spot_hist_sge") and normalized == "AU9999":
-            df = ak.spot_hist_sge(symbol="Au99.99")
-            if df is not None and not df.empty:
-                row = df.iloc[-1].to_dict()
-                close = (
-                    row.get("收盘")
-                    or row.get("close")
-                    or row.get("最新价")
-                    or row.get("price")
-                    or row.get("价格")
-                )
-                if close is not None:
-                    current = float(close)
-                    return {"current": current, "day_open": current, "points": []}
-
-        if hasattr(ak, "futures_foreign_hist"):
-            df = ak.futures_foreign_hist(symbol=symbol)
-            if df is not None and not df.empty:
-                row = df.iloc[-1].to_dict()
-                close = row.get("close") or row.get("收盘") or row.get("最新价")
-                open_px = row.get("open") or row.get("开盘") or close
-                if close is not None:
-                    return {"current": float(close), "day_open": float(open_px), "points": []}
-
-        raise ValueError("akshare no usable quote")
-
-    def _fetch_curve_from_domestic(self, symbol: str) -> Dict[str, Any]:
-        conf = DOMESTIC_SYMBOLS.get(symbol)
-        if not conf:
-            raise ValueError("No domestic mapping")
-        errors: List[str] = []
-
-        for code in conf.get("tencent", []):
-            try:
-                return self._fetch_curve_from_tencent(code)
-            except FETCH_EXCEPTIONS as exc:
-                errors.append(f"tencent:{exc}")
-
-        for code in conf.get("sina", []):
-            try:
-                return self._fetch_curve_from_sina(code)
-            except FETCH_EXCEPTIONS as exc:
-                errors.append(f"sina:{exc}")
-
-        for ak_symbol in conf.get("akshare", []):
-            try:
-                return self._fetch_curve_from_akshare(ak_symbol)
-            except FETCH_EXCEPTIONS as exc:
-                errors.append(f"akshare:{exc}")
-
-        detail = " | ".join(filter(None, self._tail_errors(errors)))
-        raise ValueError(detail or "domestic quote failed")
-
-    def fetch_curve(self, symbol: str) -> Dict[str, Any]:
+    def _fetch_quote_points(self, symbol: str) -> Dict[str, Any]:
         encoded = urllib.parse.quote(symbol)
         errors: List[str] = []
-
         for pattern in YAHOO_CHART_ENDPOINTS:
-            url = pattern.format(encoded=encoded)
             try:
-                return self._fetch_curve_from_chart(url)
+                parsed = self._request_json(pattern.format(encoded=encoded))
+                chart = parsed.get("chart", {})
+                if chart.get("error"):
+                    raise ValueError(str(chart["error"]))
+                result = (chart.get("result") or [None])[0]
+                if not result:
+                    raise ValueError("No chart result")
+                timestamps = result.get("timestamp") or []
+                quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+                closes = quote.get("close") or []
+                points = []
+                for idx, ts in enumerate(timestamps):
+                    if idx >= len(closes) or closes[idx] is None:
+                        continue
+                    points.append({"ts": int(ts), "price": float(closes[idx])})
+                meta = result.get("meta") or {}
+                current = float(meta.get("regularMarketPrice") or (points[-1]["price"] if points else 0.0))
+                if current <= 0 and points:
+                    current = points[-1]["price"]
+                if current <= 0:
+                    raise ValueError("No valid market price")
+                day_open = points[-1]["price"] if points else current
+                previous = points[-2]["price"] if len(points) > 1 else day_open
+                return {"current": current, "day_open": day_open, "points": points, "previous_close": previous}
             except FETCH_EXCEPTIONS as exc:
                 errors.append(str(exc))
 
-        try:
-            return self._fetch_curve_from_quote(encoded)
-        except FETCH_EXCEPTIONS as exc:
-            errors.append(str(exc))
+        parsed = self._request_json(YAHOO_QUOTE_ENDPOINT.format(encoded=encoded))
+        result = ((parsed.get("quoteResponse") or {}).get("result") or [None])[0]
+        if result:
+            current = float(result.get("regularMarketPrice") or 0.0)
+            day_open = float(result.get("regularMarketOpen") or current)
+            prev = float(result.get("regularMarketPreviousClose") or day_open)
+            if current > 0:
+                return {"current": current, "day_open": day_open, "points": [], "previous_close": prev}
 
-        try:
-            return self._fetch_curve_from_domestic(symbol)
-        except FETCH_EXCEPTIONS as exc:
-            errors.append(str(exc))
-
-        detail = " | ".join(filter(None, self._tail_errors(errors)))
+        detail = " | ".join(filter(None, _tail_errors(errors)))
         raise ValueError(f"{symbol} 行情获取失败: {detail or '网络连接异常'}")
+
+    def _fetch_fx_rates(self) -> Dict[str, float]:
+        rates = {"CNY": 1.0}
+        mapping = {
+            "USD": "CNY=X",
+            "HKD": "HKDCNY=X",
+            "EUR": "EURCNY=X",
+        }
+        for currency, symbol in mapping.items():
+            try:
+                quote = self._fetch_quote_points(symbol)
+                rates[currency] = float(quote["current"])
+            except Exception:
+                logging.exception("Failed to fetch FX for %s", currency)
+                rates[currency] = self.fx_rates.get(currency, 1.0)
+        return rates
+
+    @staticmethod
+    def normalized_close(close: float, fx_to_cny: float, stat_divisor: float) -> float:
+        divisor = stat_divisor if stat_divisor > 0 else 1.0
+        return close * fx_to_cny / divisor
 
     def update_market_data(self) -> None:
         with self._lock:
@@ -326,7 +360,7 @@ class PortfolioState:
 
         for symbol in symbols:
             try:
-                curve = self.fetch_curve(symbol)
+                curve = self._fetch_quote_points(symbol)
             except Exception:
                 logging.exception("Failed to fetch curve for symbol %s", symbol)
                 continue
@@ -337,7 +371,7 @@ class PortfolioState:
                 self.latest_price[symbol] = float(curve["current"])
                 self.day_open[symbol] = float(curve["day_open"])
                 history = self.price_history.setdefault(symbol, [])
-                for point in curve["points"]:
+                for point in curve.get("points", []):
                     if history and point["ts"] <= history[-1]["ts"]:
                         continue
                     history.append(point)
@@ -346,6 +380,128 @@ class PortfolioState:
                 elif history:
                     history[-1] = latest_point
                 self.price_history[symbol] = history[-1500:]
+
+    def update_indices_data(self) -> None:
+        rates = self._fetch_fx_rates()
+        snapshots: Dict[str, Dict[str, Any]] = {}
+        for cfg in INDEX_CONFIGS:
+            try:
+                data = self._fetch_quote_points(cfg.code)
+            except Exception:
+                logging.exception("Failed to fetch index %s", cfg.code)
+                continue
+
+            fx = rates.get(cfg.currency, 1.0)
+            current = float(data["current"])
+            previous = float(data.get("previous_close") or current)
+            pct = (current - previous) / previous if previous else 0.0
+
+            normalized_current = self.normalized_close(current, fx, cfg.stat_divisor)
+            points = []
+            first_normalized = None
+            for point in data.get("points", []):
+                normalized = self.normalized_close(float(point["price"]), fx, cfg.stat_divisor)
+                if first_normalized is None and normalized > 0:
+                    first_normalized = normalized
+                rebased = (normalized / first_normalized * 100.0) if first_normalized else 100.0
+                points.append({
+                    "ts": int(point["ts"]),
+                    "close": float(point["price"]),
+                    "normalized_close": normalized,
+                    "rebased_100": rebased,
+                })
+
+            snapshots[cfg.code] = {
+                "code": cfg.code,
+                "name": cfg.name,
+                "market": cfg.market,
+                "currency": cfg.currency,
+                "stat_mode": cfg.stat_mode,
+                "stat_divisor": cfg.stat_divisor,
+                "fx_to_cny": fx,
+                "raw_close": current,
+                "normalized_close": normalized_current,
+                "day_change_pct": pct,
+                "points": points[-120:],
+                "updated_at": int(time.time()),
+            }
+
+        with self._lock:
+            self.fx_rates = rates
+            self.index_snapshots = snapshots
+            self._market_last_update_ts = int(time.time())
+
+    def market_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            snapshots = list(self.index_snapshots.values())
+            rates = dict(self.fx_rates)
+            last_ts = self._market_last_update_ts
+
+        by_market: Dict[str, List[Dict[str, Any]]] = {key: [] for key in MARKET_CONFIGS.keys()}
+        for item in snapshots:
+            by_market.setdefault(item["market"], []).append(item)
+
+        overview = []
+        for key, conf in MARKET_CONFIGS.items():
+            rows = by_market.get(key, [])
+            if not rows:
+                overview.append(
+                    {
+                        "market": key,
+                        "name": conf["name"],
+                        "description": conf["description"],
+                        "index_count": 0,
+                        "avg_raw_close": 0.0,
+                        "avg_normalized_close": 0.0,
+                        "avg_day_change_pct": 0.0,
+                    }
+                )
+                continue
+            avg_raw = sum(r["raw_close"] for r in rows) / len(rows)
+            avg_normalized = sum(r["normalized_close"] for r in rows) / len(rows)
+            avg_day_change = sum(r["day_change_pct"] for r in rows) / len(rows)
+            overview.append(
+                {
+                    "market": key,
+                    "name": conf["name"],
+                    "description": conf["description"],
+                    "index_count": len(rows),
+                    "avg_raw_close": avg_raw,
+                    "avg_normalized_close": avg_normalized,
+                    "avg_day_change_pct": avg_day_change,
+                }
+            )
+
+        comparison_curve = []
+        market_curve_map: Dict[int, Dict[str, float]] = {}
+        for key in MARKET_CONFIGS.keys():
+            rows = by_market.get(key, [])
+            for row in rows:
+                for p in row.get("points", []):
+                    ts = int(p["ts"])
+                    market_curve_map.setdefault(ts, {}).setdefault(key, 0.0)
+                    market_curve_map[ts][key] += float(p["rebased_100"])
+
+        for ts in sorted(market_curve_map.keys()):
+            record = {"ts": ts}
+            for key in MARKET_CONFIGS.keys():
+                rows = by_market.get(key, [])
+                divisor = len(rows) if rows else 1
+                record[key] = market_curve_map[ts].get(key, 0.0) / divisor
+            comparison_curve.append(record)
+
+        return {
+            "updated_at": last_ts,
+            "base_currency": "CNY",
+            "fx_rates": rates,
+            "overview": overview,
+            "drilldown": by_market,
+            "comparison_curve": comparison_curve[-120:],
+            "normalization": {
+                "formula": "normalized_close = raw_close * fx_to_cny / stat_divisor",
+                "timeframe": "日K",
+            },
+        }
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
@@ -415,6 +571,7 @@ class PortfolioState:
                 "today_profit": portfolio_today_profit,
                 "curve": total_curve,
             },
+            "market_monitor": self.market_snapshot(),
             "interaction_stub": self.interaction_stub,
         }
 
@@ -470,6 +627,19 @@ class PortfolioHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "data": STATE.snapshot()})
             return
 
+        if self.path == "/api/markets/overview":
+            self._send_json(200, {"ok": True, "data": STATE.market_snapshot()})
+            return
+
+        if self.path.startswith("/api/markets/drilldown"):
+            parsed = urllib.parse.urlparse(self.path)
+            q = urllib.parse.parse_qs(parsed.query)
+            market = (q.get("market") or [""])[0]
+            data = STATE.market_snapshot()
+            rows = data["drilldown"].get(market, []) if market else data["drilldown"]
+            self._send_json(200, {"ok": True, "market": market or None, "data": rows})
+            return
+
         if self.path == "/api/events":
             self._serve_events()
             return
@@ -481,23 +651,31 @@ class PortfolioHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"ok": False, "error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/holdings/import":
-            self._send_json(404, {"ok": False, "error": "Not found"})
+        if self.path == "/api/holdings/import":
+            try:
+                payload = self._read_json()
+                rows = payload.get("rows") or []
+                replace = bool(payload.get("replace", False))
+                result = STATE.import_rows(rows=rows, replace=replace)
+                STATE.update_market_data()
+                STATE.broadcast_snapshot()
+                self._send_json(200, {"ok": True, "result": result, "data": STATE.snapshot()})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+            except Exception as exc:
+                logging.exception("Import holdings failed")
+                self._send_json(400, {"ok": False, "error": f"导入失败: {type(exc).__name__}"})
+                return
+
+        if self.path == "/api/deepseek/fund-flow":
+            payload = self._read_json()
+            result = STATE.deepseek.analyze(payload)
+            self._send_json(200, {"ok": True, "data": result})
             return
 
-        try:
-            payload = self._read_json()
-            rows = payload.get("rows") or []
-            replace = bool(payload.get("replace", False))
-            result = STATE.import_rows(rows=rows, replace=replace)
-            STATE.update_market_data()
-            STATE.broadcast_snapshot()
-            self._send_json(200, {"ok": True, "result": result, "data": STATE.snapshot()})
-        except ValueError as exc:
-            self._send_json(400, {"ok": False, "error": str(exc)})
-        except Exception as exc:
-            logging.exception("Import holdings failed")
-            self._send_json(400, {"ok": False, "error": f"导入失败: {type(exc).__name__}"})
+        self._send_json(404, {"ok": False, "error": "Not found"})
 
     def _serve_events(self) -> None:
         self.send_response(200)
@@ -509,14 +687,14 @@ class PortfolioHandler(BaseHTTPRequestHandler):
 
         sub = STATE.register_subscriber()
         try:
-            initial = f"event: snapshot\ndata: {json.dumps(STATE.snapshot(), ensure_ascii=False)}\n\n"
+            initial = f"event: snapshot\\ndata: {json.dumps(STATE.snapshot(), ensure_ascii=False)}\\n\\n"
             self.wfile.write(initial.encode("utf-8"))
             self.wfile.flush()
             while True:
                 try:
                     msg = sub.get(timeout=20)
                 except queue.Empty:
-                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.write(b": keep-alive\\n\\n")
                     self.wfile.flush()
                     continue
                 self.wfile.write(msg.encode("utf-8"))
@@ -531,6 +709,7 @@ def market_loop() -> None:
     while True:
         try:
             STATE.update_market_data()
+            STATE.update_indices_data()
             STATE.broadcast_snapshot()
         except Exception:
             logging.exception("Market loop iteration failed")
@@ -541,7 +720,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Realtime portfolio tracker backend")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8877)
-    parser.add_argument("--poll-seconds", type=int, default=10)
+    parser.add_argument("--poll-seconds", type=int, default=15)
     return parser.parse_args()
 
 
@@ -553,6 +732,7 @@ def main() -> None:
     preload = [{"symbol_or_name": "现货黄金", "quantity": 1, "cost_price": DEFAULT_GOLD_TEST_COST}]
     STATE.import_rows(preload, replace=True)
     STATE.update_market_data()
+    STATE.update_indices_data()
 
     t = threading.Thread(target=market_loop, daemon=True)
     t.start()

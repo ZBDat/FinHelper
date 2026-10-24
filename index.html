@@ -3,350 +3,216 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FinHelper 实时持仓面板</title>
+    <title>FinHelper 全球指数监控（日K）</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         :root {
             --bg: #f5f7fb;
             --card: #ffffff;
-            --text: #222;
-            --muted: #666;
-            --good: #16803c;
-            --bad: #ca2d2d;
             --line: #e6eaf0;
-            --blue: #2463eb;
+            --text: #20262f;
+            --muted: #5f6b7a;
+            --up: #0f8f46;
+            --down: #d23a3a;
+            --primary: #2f67ff;
         }
         * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            background: var(--bg);
-            color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-        .page { width: 100%; padding: 10px 14px; display: grid; gap: 12px; }
-        .card {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            padding: 12px;
-        }
-        .title-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        h1, h2, h3, p { margin: 0; }
-        h1 { font-size: 20px; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .page { padding: 14px; display: grid; gap: 12px; }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+        .title { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+        h1,h2,h3,p { margin: 0; }
+        h1 { font-size: 21px; }
         h2 { font-size: 16px; margin-bottom: 8px; }
         .muted { color: var(--muted); font-size: 13px; }
-        .workspace {
-            display: grid;
-            gap: 12px;
-            grid-template-columns: minmax(300px, 1.2fr) minmax(480px, 2fr) minmax(260px, 1fr);
-            align-items: start;
-        }
-        .stack { display: grid; gap: 12px; }
-        textarea {
-            width: 100%;
-            min-height: 120px;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 10px;
-            font-size: 13px;
-            resize: vertical;
-        }
-        .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-        button {
-            border: none;
-            border-radius: 8px;
-            padding: 8px 12px;
-            cursor: pointer;
-            background: var(--blue);
-            color: #fff;
-            font-size: 13px;
-        }
-        button.secondary { background: #6d7a90; }
-        .metrics {
-            margin-top: 8px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 8px;
-        }
-        .metric {
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 8px;
-            background: #fbfcff;
-        }
-        .metric .k { color: var(--muted); font-size: 12px; }
-        .metric .v { font-size: 18px; font-weight: 600; margin-top: 4px; }
-        .good { color: var(--good); }
-        .bad { color: var(--bad); }
-        .assets {
-            display: grid;
-            gap: 10px;
-            grid-template-columns: 1fr;
-        }
-        .asset-item {
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 8px;
-            background: #fff;
-        }
-        .chart { width: 100%; height: 280px; }
-        .asset-chart { width: 100%; height: 170px; margin-top: 6px; }
-        .side-list {
-            display: grid;
-            gap: 8px;
-            max-height: 560px;
-            overflow: auto;
-            padding-right: 4px;
-        }
-        .side-item {
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: #fbfcff;
-            padding: 8px;
-        }
-        .side-item .line {
-            display: flex;
-            justify-content: space-between;
-            gap: 10px;
-            margin-top: 4px;
-            font-size: 13px;
-        }
-        .price-value { font-size: 20px; font-weight: 700; text-align: right; }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #999;
-            display: inline-block;
-        }
-        .status-dot.ok { background: #1f9d4f; }
-        .status-dot.err { background: #cc3f3f; }
-
-        @media (max-width: 860px) {
+        .grid-overview { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+        .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcff; }
+        .kpi .v { font-size: 20px; font-weight: 700; margin-top: 4px; }
+        .up { color: var(--up); }
+        .down { color: var(--down); }
+        .workspace { display: grid; gap: 12px; grid-template-columns: minmax(360px,1.2fr) minmax(400px,1.4fr) minmax(260px,1fr); }
+        .chart { width: 100%; height: 320px; }
+        .side { display: grid; gap: 8px; max-height: 620px; overflow: auto; }
+        .side-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fbfcff; }
+        .line { display: flex; justify-content: space-between; margin-top: 4px; font-size: 13px; gap: 8px; }
+        .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        select, textarea, button { border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+        select, button { padding: 8px 10px; background: #fff; }
+        button { cursor: pointer; border: none; background: var(--primary); color: #fff; }
+        button.secondary { background: #6f7f94; }
+        textarea { width: 100%; min-height: 90px; padding: 8px; resize: vertical; }
+        .status-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; background: #999; }
+        .status-dot.ok { background: #1aa151; }
+        .status-dot.err { background: #cb3f3f; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        @media (max-width: 980px) {
             .workspace { grid-template-columns: 1fr; }
             .chart { height: 290px; }
-            .asset-chart { height: 220px; }
-            .side-list { max-height: none; }
+            .side { max-height: none; }
         }
     </style>
 </head>
 <body>
 <div class="page">
-    <div class="card">
-        <div class="title-row">
-            <div>
-                <h1>FinHelper 实时资产看板</h1>
-                <p class="muted">前后端分离：前端只做展示与交互，后端统一做行情抓取、持仓计算和实时推送。</p>
-            </div>
-            <div class="title-row">
-                <span id="connDot" class="status-dot"></span>
-                <span id="connText" class="muted">连接中...</span>
-            </div>
+    <div class="card title">
+        <div>
+            <h1>FinHelper 全球指数监控（日K）</h1>
+            <p class="muted" id="metaInfo">加载中...</p>
         </div>
+        <div class="title">
+            <span id="connDot" class="status-dot"></span>
+            <span id="connText" class="muted">连接中...</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>四大市场总览</h2>
+        <div class="grid-overview" id="overviewCards"></div>
     </div>
 
     <div class="workspace">
-        <div class="stack">
-            <div class="card">
-                <h2>持仓信息（左侧）</h2>
-                <div id="holdingsBoard" class="side-list"></div>
-            </div>
-            <div class="card">
-                <h2>导入持仓（名称或代码）</h2>
-                <p class="muted">每行：名称/代码, 数量, 成本价。示例已包含现货黄金测试用例。</p>
-                <textarea id="holdingsInput"></textarea>
-                <div class="btns">
-                    <button id="importBtn">导入并替换持仓</button>
-                    <button class="secondary" id="appendBtn">追加持仓</button>
-                    <button class="secondary" id="goldCaseBtn">填入现货黄金示例</button>
-                </div>
-                <p class="muted" id="importResult" style="margin-top:8px;"></p>
-            </div>
-        </div>
-
-        <div class="stack">
-            <div class="card">
-                <h2>总资产实时指标</h2>
-                <div class="metrics" id="portfolioMetrics"></div>
-                <div id="totalChart" class="chart"></div>
-            </div>
-            <div class="card">
-                <h2>各资产曲线</h2>
-                <div id="assetsContainer" class="assets"></div>
-            </div>
+        <div class="card">
+            <h2>统一单位对比（Rebased=100）</h2>
+            <div id="compareChart" class="chart"></div>
         </div>
 
         <div class="card">
-            <h2>资产价格（右侧）</h2>
-            <div id="priceBoard" class="side-list"></div>
+            <h2>市场拆解（日K）</h2>
+            <div class="controls">
+                <label class="muted" for="marketSelect">市场</label>
+                <select id="marketSelect">
+                    <option value="cn">A股</option>
+                    <option value="us">美股</option>
+                    <option value="hk">港股</option>
+                    <option value="eu">欧洲</option>
+                </select>
+                <button class="secondary" id="refreshBtn">刷新</button>
+            </div>
+            <div id="drilldownChart" class="chart"></div>
+        </div>
+
+        <div class="card">
+            <h2>指数明细</h2>
+            <div id="indexBoard" class="side"></div>
         </div>
     </div>
 
     <div class="card">
-        <h2>客户交互（预留，底部）</h2>
-        <p class="muted" id="interactionInfo">加载中...</p>
-        <div class="btns">
-            <button class="secondary" id="refreshInteractionBtn">刷新预留能力</button>
+        <h2>DeepSeek 资金流解读（预留API Key）</h2>
+        <div class="controls">
+            <button id="analyzeBtn">分析当前市场</button>
         </div>
-        <p class="muted" style="margin-top:8px;">后续可接入登录、消息、指令回传，此面板独立于图表区，避免冲突。</p>
+        <textarea id="flowSummary" placeholder="可选：补充你关注的资金流观察点"></textarea>
+        <p class="muted" id="analysisMeta" style="margin-top:8px;">尚未分析</p>
+        <div class="card" style="margin-top:8px; background:#fbfcff;"><p id="analysisText" class="mono">等待调用...</p></div>
     </div>
 </div>
 
 <script>
     const apiBase = new URLSearchParams(window.location.search).get('apiBase') || '';
+    const marketNames = { cn: 'A股', us: '美股', hk: '港股', eu: '欧洲' };
     const connDot = document.getElementById('connDot');
     const connText = document.getElementById('connText');
-    const importResult = document.getElementById('importResult');
-    const portfolioMetrics = document.getElementById('portfolioMetrics');
-    const assetsContainer = document.getElementById('assetsContainer');
-    const holdingsBoard = document.getElementById('holdingsBoard');
-    const priceBoard = document.getElementById('priceBoard');
-    const holdingsInput = document.getElementById('holdingsInput');
-    const DEFAULT_GOLD_CASE = '现货黄金,1,2300';
+    const marketSelect = document.getElementById('marketSelect');
+    const overviewCards = document.getElementById('overviewCards');
+    const indexBoard = document.getElementById('indexBoard');
 
+    let currentSnapshot = null;
     let eventSource = null;
 
-    const fmtMoney = (n) => Number.isFinite(n) ? n.toFixed(2) : '-';
+    const fmtNum = (n) => Number.isFinite(n) ? Number(n).toFixed(2) : '-';
     const fmtPct = (n) => Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '-';
+    const cls = (n) => n > 0 ? 'up' : (n < 0 ? 'down' : '');
 
-    function clsBySign(num) {
-        if (!Number.isFinite(num) || num === 0) return '';
-        return num > 0 ? 'good' : 'bad';
+    function renderOverview(marketData) {
+        const cards = marketData.overview || [];
+        overviewCards.innerHTML = cards.map(item => `
+            <div class="kpi">
+                <h3>${item.name}</h3>
+                <p class="muted">${item.description}</p>
+                <div class="line"><span class="muted">指数数量</span><span>${item.index_count}</span></div>
+                <div class="line"><span class="muted">原始均值</span><span>${fmtNum(item.avg_raw_close)}</span></div>
+                <div class="line"><span class="muted">统一单位均值(CNY)</span><span>${fmtNum(item.avg_normalized_close)}</span></div>
+                <div class="line"><span class="muted">日涨跌</span><span class="${cls(item.avg_day_change_pct)}">${fmtPct(item.avg_day_change_pct)}</span></div>
+            </div>
+        `).join('');
     }
 
-    function parseRows(text) {
-        const errors = [];
-        const rows = text
-            .split('\n')
-            .map((line, idx) => ({ line: line.trim(), idx: idx + 1 }))
-            .filter(item => item.line)
-            .map(item => {
-                const cols = item.line.split(/[，,\s]+/).filter(Boolean);
-                if (cols.length !== 3) {
-                    errors.push(`第 ${item.idx} 行格式错误，应为: 名称/代码,数量,成本价`);
-                    return null;
-                }
-                const quantity = Number(cols[1]);
-                const costPrice = Number(cols[2]);
-                if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(costPrice)) {
-                    errors.push(`第 ${item.idx} 行数值错误，数量需>0，成本价需为数字`);
-                    return null;
-                }
-                return {
-                    symbol_or_name: cols[0],
-                    quantity,
-                    cost_price: costPrice
-                };
-            })
-            .filter(Boolean);
-        if (errors.length) {
-            throw new Error(errors.join('；'));
-        }
-        return rows;
-    }
-
-    function renderPortfolio(data) {
-        const p = data.portfolio;
-        portfolioMetrics.innerHTML = `
-            <div class="metric"><div class="k">总资产</div><div class="v">${fmtMoney(p.total_current_value)}</div></div>
-            <div class="metric"><div class="k">持仓以来收益</div><div class="v ${clsBySign(p.since_profit)}">${fmtMoney(p.since_profit)}</div></div>
-            <div class="metric"><div class="k">持仓以来收益率</div><div class="v ${clsBySign(p.since_return_rate)}">${fmtPct(p.since_return_rate)}</div></div>
-            <div class="metric"><div class="k">当日收益</div><div class="v ${clsBySign(p.today_profit)}">${fmtMoney(p.today_profit)}</div></div>
-        `;
-
-        const x = p.curve.map(i => new Date(i.ts * 1000));
-        const y = p.curve.map(i => i.value);
-        Plotly.react('totalChart', [{ x, y, mode: 'lines', line: { color: '#2463eb', width: 2 }, name: '总资产' }], {
-            margin: { l: 48, r: 20, t: 12, b: 36 },
+    function renderComparison(marketData) {
+        const rows = marketData.comparison_curve || [];
+        const x = rows.map(r => new Date(r.ts * 1000));
+        const series = ['cn', 'us', 'hk', 'eu'].map(key => ({
+            x,
+            y: rows.map(r => r[key]),
+            mode: 'lines',
+            name: marketNames[key]
+        }));
+        Plotly.react('compareChart', series, {
+            margin: { l: 46, r: 12, t: 10, b: 34 },
             xaxis: { type: 'date' },
-            yaxis: { title: '资产价值' },
-            showlegend: false
+            yaxis: { title: '统一单位对比(Rebased=100)' }
+        }, { responsive: true, displaylogo: false });
+    }
+
+    function renderDrilldown(marketData, marketKey) {
+        const indices = (marketData.drilldown || {})[marketKey] || [];
+        const traces = indices.map(idx => ({
+            x: (idx.points || []).map(p => new Date(p.ts * 1000)),
+            y: (idx.points || []).map(p => p.normalized_close),
+            mode: 'lines',
+            name: idx.name
+        }));
+        Plotly.react('drilldownChart', traces, {
+            margin: { l: 46, r: 12, t: 10, b: 34 },
+            xaxis: { type: 'date' },
+            yaxis: { title: '标准化值 (CNY)' }
         }, { responsive: true, displaylogo: false });
 
-        holdingsBoard.innerHTML = data.assets.map(asset => `
+        indexBoard.innerHTML = indices.map(idx => `
             <div class="side-item">
-                <h3>${asset.display_name} (${asset.symbol})</h3>
-                <div class="line"><span class="muted">持仓数量</span><span>${asset.quantity}</span></div>
-                <div class="line"><span class="muted">成本价</span><span>${fmtMoney(asset.cost_price)}</span></div>
-                <div class="line"><span class="muted">持仓市值</span><span>${fmtMoney(asset.current_value)}</span></div>
-                <div class="line"><span class="muted">持仓收益</span><span class="${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</span></div>
+                <h3>${idx.name}</h3>
+                <div class="line"><span class="muted">代码</span><span>${idx.code}</span></div>
+                <div class="line"><span class="muted">币种</span><span>${idx.currency}</span></div>
+                <div class="line"><span class="muted">原始收盘</span><span>${fmtNum(idx.raw_close)}</span></div>
+                <div class="line"><span class="muted">标准化值(CNY)</span><span>${fmtNum(idx.normalized_close)}</span></div>
+                <div class="line"><span class="muted">日涨跌</span><span class="${cls(idx.day_change_pct)}">${fmtPct(idx.day_change_pct)}</span></div>
+                <div class="line"><span class="muted">口径</span><span>${idx.stat_mode} ÷ ${fmtNum(idx.stat_divisor)}</span></div>
             </div>
-        `).join('') || '<p class="muted">暂无持仓数据</p>';
-
-        priceBoard.innerHTML = data.assets.map(asset => `
-            <div class="side-item">
-                <h3>${asset.display_name}</h3>
-                <div class="price-value ${clsBySign(asset.today_profit)}">${fmtMoney(asset.current_price)}</div>
-                <div class="line"><span class="muted">当日盈亏</span><span class="${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</span></div>
-                <div class="line"><span class="muted">持仓收益率</span><span class="${clsBySign(asset.since_return_rate)}">${fmtPct(asset.since_return_rate)}</span></div>
-            </div>
-        `).join('') || '<p class="muted">暂无价格数据</p>';
-
-        assetsContainer.innerHTML = '';
-        data.assets.forEach((asset, idx) => {
-            const id = `assetChart_${idx}`;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'asset-item';
-            wrapper.innerHTML = `
-                <h3>${asset.display_name} (${asset.symbol})</h3>
-                <p class="muted">持仓收益: <span class="${clsBySign(asset.since_profit)}">${fmtMoney(asset.since_profit)}</span> | 当日收益: <span class="${clsBySign(asset.today_profit)}">${fmtMoney(asset.today_profit)}</span></p>
-                <div id="${id}" class="asset-chart"></div>
-            `;
-            assetsContainer.appendChild(wrapper);
-
-            Plotly.react(id, [{
-                x: asset.curve.map(i => new Date(i.ts * 1000)),
-                y: asset.curve.map(i => i.value),
-                mode: 'lines',
-                line: { color: '#fd7e14', width: 2 },
-                name: asset.display_name
-            }], {
-                margin: { l: 40, r: 10, t: 10, b: 28 },
-                xaxis: { type: 'date' },
-                yaxis: { title: '价值' },
-                showlegend: false
-            }, { responsive: true, displaylogo: false });
-        });
+        `).join('') || '<p class="muted">暂无数据</p>';
     }
 
-    async function importHoldings(replace) {
-        const rows = parseRows(holdingsInput.value);
-        if (!rows.length) {
-            importResult.textContent = '请输入至少一行持仓。';
-            return;
-        }
-        const r = await fetch(`${apiBase}/api/holdings/import`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rows, replace })
-        });
-        const payload = await r.json();
-        if (!r.ok || !payload.ok) {
-            throw new Error(payload.error || '导入失败');
-        }
-        importResult.textContent = `导入成功：${payload.result.count} 条。`;
-        renderPortfolio(payload.data);
+    function renderSnapshot(data) {
+        currentSnapshot = data;
+        const marketData = data.market_monitor || { overview: [], drilldown: {}, comparison_curve: [] };
+        renderOverview(marketData);
+        renderComparison(marketData);
+        renderDrilldown(marketData, marketSelect.value);
+
+        const updated = marketData.updated_at ? new Date(marketData.updated_at * 1000).toLocaleString() : '-';
+        const fx = marketData.fx_rates || {};
+        document.getElementById('metaInfo').textContent = `时间粒度: ${marketData.normalization?.timeframe || '日K'} ｜ 基准币种: ${marketData.base_currency || 'CNY'} ｜ 汇率 USD:${fmtNum(fx.USD)} HKD:${fmtNum(fx.HKD)} EUR:${fmtNum(fx.EUR)} ｜ 更新时间: ${updated}`;
     }
 
     async function loadSnapshot() {
         const r = await fetch(`${apiBase}/api/snapshot`);
         const payload = await r.json();
-        if (payload.ok) renderPortfolio(payload.data);
+        if (payload.ok) renderSnapshot(payload.data);
     }
 
-    async function loadInteractionStub() {
-        const r = await fetch(`${apiBase}/api/client-interaction`);
+    async function analyzeFlow() {
+        const market = marketSelect.value;
+        const summary = document.getElementById('flowSummary').value;
+        const r = await fetch(`${apiBase}/api/deepseek/fund-flow`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market, summary })
+        });
         const payload = await r.json();
-        if (payload.ok) {
-            const info = payload.data;
-            document.getElementById('interactionInfo').textContent = `${info.message}（能力：${info.capabilities.join(', ')}）`;
-        }
+        const data = payload.data || {};
+        document.getElementById('analysisText').textContent = data.analysis || data.error || '暂无返回';
+        const ts = data.last_updated ? new Date(data.last_updated * 1000).toLocaleString() : '-';
+        const mode = data.degraded ? '降级模式' : '在线模式';
+        document.getElementById('analysisMeta').textContent = `状态: ${mode} ｜ 更新时间: ${ts}`;
     }
 
     function connectEvents() {
@@ -358,37 +224,24 @@
             connDot.className = 'status-dot ok';
             connText.textContent = '实时连接正常';
             try {
-                renderPortfolio(JSON.parse(evt.data));
+                renderSnapshot(JSON.parse(evt.data));
             } catch (e) {
-                console.error('snapshot parse failed', e);
+                console.error(e);
             }
         });
-
         es.onerror = () => {
             connDot.className = 'status-dot err';
             connText.textContent = '连接中断，自动重连...';
         };
     }
 
-    document.getElementById('importBtn').addEventListener('click', () => importHoldings(true).catch(e => {
-        importResult.textContent = e.message;
-    }));
-
-    document.getElementById('appendBtn').addEventListener('click', () => importHoldings(false).catch(e => {
-        importResult.textContent = e.message;
-    }));
-
-    document.getElementById('goldCaseBtn').addEventListener('click', () => {
-        holdingsInput.value = DEFAULT_GOLD_CASE;
+    marketSelect.addEventListener('change', () => {
+        if (currentSnapshot) renderDrilldown(currentSnapshot.market_monitor || {}, marketSelect.value);
     });
-
-    document.getElementById('refreshInteractionBtn').addEventListener('click', () => {
-        loadInteractionStub();
-    });
+    document.getElementById('refreshBtn').addEventListener('click', () => loadSnapshot());
+    document.getElementById('analyzeBtn').addEventListener('click', () => analyzeFlow());
 
     loadSnapshot();
-    loadInteractionStub();
-    holdingsInput.value = DEFAULT_GOLD_CASE;
     connectEvents();
 </script>
 </body>
